@@ -1,0 +1,5 @@
+#ignore folder content
+tomatoFSPM_basic/*
+
+#except for the input files
+!tomatoFSPM_basic/input!
