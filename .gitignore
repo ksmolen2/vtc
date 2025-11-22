@@ -2,4 +2,4 @@
 tomatoFSPM_basic/*
 
 #except for the input files
-!tomatoFSPM_basic/input!
+!tomatoFSPM_basic/input/
