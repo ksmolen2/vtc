@@ -1,0 +1,297 @@
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.io.BufferedReader;
+import java.io.FileReader;
+
+import static parameters.*;
+
+static void calcClimate() {		
+	// temperature
+	if (tempModel == TEMP_KASPRO) {
+		if (dayOfYear < STARTING_DOY_DATA_KASPRO) {
+			tav = getDailyTemp(dayOfYear-STARTING_DOY_DATA);  
+		} else {
+			tav = getDailyTempKaspro(dayOfYear-STARTING_DOY_DATA);  
+		}
+	} else if (tempModel == TEMP_CONST) {
+		tav = TEMP_CONST_AVG;
+	} else if (tempModel == TEMP_VAR) {
+		// average daily temperature for De Bilt (NL) 2001-2019
+		// from FSPM_BASIC
+		tav = 10.7 + 7.55 * Math.sin(2*Math.PI*(dayOfYear-111)/365);	
+	}
+	
+	// CO2
+	if (CO2Model == CO2_KASPRO) {
+		if (dayOfYear < STARTING_DOY_DATA_KASPRO) {
+			co2av = getDailyCO2(dayOfYear-STARTING_DOY_DATA);
+		} else {
+			co2av = getDailyCO2Kaspro(dayOfYear-STARTING_DOY_DATA);
+		}
+	} else if (CO2Model == CO2_CONST) {
+		co2av = CO2_CONST_AVG;
+	}
+	
+	// PAR
+	if (radiationModel == RAD_KASPRO) {
+		if (dayOfYear < STARTING_DOY_DATA_KASPRO+5) { // the first 5 days to replace the predicted values
+			parav = DR_FIXED;
+		} else {
+			parav = getDailyPARKaspro(dayOfYear-STARTING_DOY_DATA);
+		}
+	}
+	
+	
+}
+
+static void computeLM()
+{	
+	LM.setSeed(LM_SEED);
+	LM.compute();
+	
+}
+
+static void updateIncomingLight() {
+	if (dayLengthModel == DL_CONST) {
+		dayLength = DL_FIXED;
+	} else if (dayLengthModel == DL_VAR) {
+		dayLength = calcDayLength(dayOfYear, latitude);
+	}
+	
+	betaAzimSdr = getRadiation(dayOfYear, latitude, n);
+	//println("betaAzim: " + betaAzimSdr[2][n] + ", " + betaAzimSdr[2][n+1]);
+	
+	if (radiationModel == RAD_CONST) {
+		PPFD = DR_FIXED;
+	} else if (radiationModel == RAD_KASPRO) {
+		globalRadiationIntensity = betaAzimSdr[2][n];
+		PPFD = 1e6 * 0.55 * 4.55 * globalRadiationIntensity / (dayLength*60*60);
+		if (PPFD < parav) {
+			PPFD = parav;
+		}
+		DailyDiffuseRadiation = betaAzimSdr[2][n+1];
+	} else if (radiationModel == RAD_VAR){
+		globalRadiationIntensity = betaAzimSdr[2][n];
+		PPFD = 1e6 * 0.55 * 4.55 * globalRadiationIntensity / (dayLength*60*60);
+		if (PPFD <= DR_FIXED) {
+			PPFD = DR_FIXED;
+		}
+		DailyDiffuseRadiation = betaAzimSdr[2][n+1];
+	}
+}
+
+// daylength (from Diurnal model by A. Morales)
+static double calcDayLength(int doy, double lat) {
+	// Declination angle of the sun due to the fact that Earth's rotation axis is not perpendicular to translation plane
+	double dec = Math.asin(-Math.sin(23.45*Math.PI/180.0)*Math.cos(2.0*Math.PI*(doy + 10.0)/365.0));
+	// Calculate sunset angle with respect to solar non
+	double cosSunset = -Math.tan(lat)*Math.tan(dec);
+	double sunset = cosSunset > 1 ? 0 : (cosSunset < -1 ? Math.PI : Math.acos(cosSunset));
+	// Length of the day (sunrise - sunset) in hours
+	return 2.0*sunset/Math.PI*12;
+}
+
+// solar azimuth angle (A. Morales)
+static float[][] getRadiation(int dayOfYear, float latitude, int n) {
+	//daily parameters
+    float eccentricity =  1+0.033*Math.cos(2*Math.PI*(dayOfYear-10)/365);  // the position of the earth during the year
+	float sinDelta = -Math.sin(tilt) * Math.cos(2*Math.PI*(dayOfYear+10)/365); 
+	float cosDelta = Math.sqrt(1-(sinDelta)**2);  //delta is the declination of the sun with respect to the earth equator
+	float a = Math.sin(latitude)*sinDelta;  // the season-dependent solar shift with respect to the equator
+	float b = Math.cos(latitude)*cosDelta;  // the season-dependent amlitude of tthe sine of solar height
+	float dayLength = 12 *(1+(2/Math.PI)*Math.asin(a/b));
+	float tsr = 12 - dayLength/2;			// time of sun rise
+	float IntegralOfDailySinBeta = 3600*(dayLength*(a + c *(a**2 + 0.5 * b**2)) + 
+			12/Math.PI * b*(2+ 3 * c *a)* Math.sqrt(1 - a**2 / b**2));   // daily integral of sinbeat take account of the transmission at different angle
+			
+	float DailyExtraTerrestrialRadiation = 1367 * eccentricity * IntegralOfDailySinBeta/ 1e6; //Daily extraterrestrial solar
+	float DailyDiffuseRadiation =  FractionDiffuseLightDaily * Transmissivity  * DailyExtraTerrestrialRadiation;
+	// hourly parameters
+	float timeInterval = dayLength / n * 3600; // Time interval in seconds
+	float[] hourAngle = new float[n];
+	float[] beta = new float[n];
+	float Sg = 0;  // instantaneous light intensity
+	float S0 = 1367 * eccentricity/ 1e6;  //instant External radiation
+	float S0d = 0;
+	float[][] betaAzimSdr = new float[3][];  // row 0 beta; row 1 azimuth; and row 3 direct light in one array
+	betaAzimSdr[0] = new float[n];
+	betaAzimSdr[1] = new float[n];
+	betaAzimSdr[2] = new float[n+2]; // add daily total radiation MJ/m2, daily total at horzontal plane and daily diffuse light
+	
+	for (int j = 0; j <= n-1; j++) {
+		hourAngle[j] = 2 * Math.PI *(tsr + j*timeInterval/3600 - 12)/24;
+		beta[j] = Math.asin(a + b * Math.cos(hourAngle[j]));
+		betaAzimSdr[0][j] = ToDegree * beta[j]; // beta in degree
+		if (betaAzimSdr[0][j] < 0) {betaAzimSdr[2][j] = 0;}  // make the morning and afternoon points symetric
+		//azimuth
+		betaAzimSdr[1][j] = ToDegree * Math.acos( Math.min(1.0, (Math.sin(beta[j]) * Math.sin(latitude) - sinDelta)
+							/( Math.cos(beta[j]) * Math.cos(latitude)))); // azimuth in degree
+		betaAzimSdr[1][j] = (hourAngle[j] > 0)? (180+ betaAzimSdr[1][j])%360
+							:(3* 180 - betaAzimSdr[1][j])%360;
+		if(hourAngle[j]==0) {betaAzimSdr[1][j] = betaAzimSdr[1][j-1] > 90 ? 180:0;};
+		//direct light at perpendicular direction, since the light model can account for the solar elevation angle
+		Sg = (1+ c * Math.sin(beta[j])) * Transmissivity * DailyExtraTerrestrialRadiation / IntegralOfDailySinBeta;  
+		betaAzimSdr[2][j] = (1- FractionDiffuseLightDaily) * Sg * timeInterval; // Direct radiation integrated over delt in MJ/m2
+	}
+	 betaAzimSdr[2][n] =  DailyExtraTerrestrialRadiation * Transmissivity; 	 // add daily total radiation at horizontal plane MJ/m2
+	 betaAzimSdr[2][n+1] =  DailyDiffuseRadiation; 				// add daily diffuse radiation MJ/m2
+	 
+	return betaAzimSdr;
+}
+
+// read (pre-processed) climate data from a climate box inside compartment 1
+// daily values were computed from 5 min recorded values using an R script
+static String[][] readClimateData(String input) throws FileNotFoundException, IOException
+{
+	ArrayList data = new ArrayList();
+	
+	BufferedReader br = new BufferedReader(new FileReader(input));
+	String line = "";
+	String csvSplitBy = ";";	// separator
+	
+	// skip the first line (header)
+	// daymd;day;mtemp;mRH;mCO2;...
+	line = br.readLine();
+	// second line
+	// 27-9-2021;270;20.66527778;71.98125;453.2916667;...
+	line = br.readLine();
+	
+	while (line != null) {
+		
+		println(line);
+		data.add(line.split(csvSplitBy));
+		
+		line = br.readLine();
+	}
+	
+	return (String[][]) data.toArray(new String[data.size()][]);
+}
+
+// get daily temperature
+static float getDailyTemp(int step)
+{
+	float temp;
+	int doyDataMax = Integer.parseInt(climateDataDaily[climateDataDaily.length-1][1]);
+	
+	int tempCol = 2;
+	
+	if (dayOfYear < doyDataMax) {
+		// temp from data
+		println("temperature from data");
+		if (climateDataDaily[step][tempCol] != null && climateDataDaily[step][tempCol].length() > 0) {
+			temp = Double.parseDouble(climateDataDaily[step][tempCol]);
+		} else {
+			temp = TEMP_CONST_AVG;	// no values were measured
+		}
+	} else {
+		// fixed temp
+		println("fixed temperature");
+		// TODO use last value from the file
+		temp = TEMP_CONST_AVG;
+	}
+	
+	return temp;
+}
+
+
+// get daily CO2
+static float getDailyCO2(int step)
+{
+	float co2;
+	int doyDataMax = Integer.parseInt(climateDataDaily[climateDataDaily.length-1][1]);
+	
+	int co2col = 4;
+	
+	if (dayOfYear < doyDataMax) {
+		// co2 from data
+		println("co2 from data");
+		if (climateDataDaily[step][co2col] != null && climateDataDaily[step][co2col].length() > 0) {
+			co2 = Double.parseDouble(climateDataDaily[step][co2col]);
+		} else {
+			co2 = CO2_CONST_AVG;	// no values were measured
+		}
+	} else {
+		// fixed co2
+		println("fixed co2");
+		// TODO use last value from the file
+		co2 = CO2_CONST_AVG;
+	}
+	
+	return co2;
+}
+
+// get daily temperature
+static float getDailyTempKaspro(int step)
+{
+	float temp;
+	int doyDataMax = LAST_DOY_DATA_KASPRO;
+	
+	int tempCol = 11;
+	
+	if (dayOfYear < doyDataMax) {
+		// temp from data
+		println("temperature from data");
+		if (climateDataDaily[step][tempCol] != null && climateDataDaily[step][tempCol].length() > 0) {
+			temp = Double.parseDouble(climateDataDaily[step][tempCol]);
+		} else {
+			temp = TEMP_CONST_AVG;;	// no values were measured
+		}
+	} else {
+		// fixed temp
+		println("fixed temperature");
+		// TODO use last value from the file
+		temp = TEMP_CONST_AVG;
+	}
+	
+	return temp;
+}
+
+// get daily CO2
+static float getDailyCO2Kaspro(int step)
+{
+	float co2;
+	int doyDataMax = LAST_DOY_DATA_KASPRO;
+	
+	int co2col = 13;
+	
+	if (dayOfYear < doyDataMax) {
+		// co2 from data
+		println("co2 from data");
+		if (climateDataDaily[step][co2col] != null && climateDataDaily[step][co2col].length() > 0) {
+			co2 = Double.parseDouble(climateDataDaily[step][co2col]);
+		} else {
+			co2 = CO2_CONST_AVG;	// no values were measured
+		}
+	} else {
+		// fixed co2
+		println("fixed co2");
+		co2 = CO2_CONST_AVG;
+	}
+	
+	return co2;
+}
+
+static float getDailyPARKaspro(int step)
+{
+	float par;
+	int doyDataMax = LAST_DOY_DATA_KASPRO;
+	
+	int parCol = 22;
+	
+	if (dayOfYear < doyDataMax) {
+		// par from data (umol/m2/s)
+		println("par from data");
+		if (climateDataDaily[step][parCol] != null && climateDataDaily[step][parCol].length() > 0) {
+			par = Double.parseDouble(climateDataDaily[step][parCol]);
+		} else {
+			par = DR_FIXED;	// no values were measured
+		}
+	} else {
+		// fixed par
+		println("fixed par");
+		par = DR_FIXED;
+	}
+	
+	return par;
+}

@@ -1,0 +1,107 @@
+import static modules_base.*;
+import static modules_organs.*;
+import static modules_light.*;
+import static parameters.*;
+import static environment.*;
+import static main.*;
+
+
+static void renew()
+[
+	{
+		time++;
+		dayOfYear++;
+		
+		calcClimate();
+		updateIncomingLight();
+	}
+	
+	// update light sources
+	dr:DirectLight ::> {
+		if (directLight) {
+			dr.update();
+		}
+	}
+	
+	df:DiffuseLight ::> {
+		df.update();
+	}
+	
+	// calculate all organ ages
+	o:Organ ::> {
+		o.calcAge();
+	}
+	
+	// calculate sink strength for all growing organs
+	g:GrowingOrgan ::> {
+		g.calcSinkStrength();
+	}
+	
+	// calculate light interception and photosynthesis for all visible organs
+	v:VisibleOrgan ::> {
+		v.calcLight();
+		v.calcPhotosynthesis();
+	}
+	
+	// update leaf insertion angle
+	l:Leaf ::> {
+		l.calcSegments();
+	}
+	
+	// calculate whole plant attributes
+	// accumulate organ assimilates and sink strengths for the whole plant
+	pb:PlantBase ::> {
+		pb.calcAge();
+		pb.calcSourceStrength();
+		pb.calcSinkStrength();
+	}
+	
+	// calculate organ growth
+	g:GrowingOrgan ::> {
+		g.calcAssimilateAllocation();
+	}
+	
+	// calculate physical sizes of visible organs
+	v:VisibleOrgan ::> {
+		v.calcDimensions();
+	}
+	
+	// calculate leaf angle as function of its length
+	l:Leaf ::> {
+		l.calcAngle();
+	}
+	
+	{
+		if (dayOfYear == 286) { // change happened at doy 285
+			updateStructure();
+			
+			[
+				// calculate light interception and photosynthesis for all visible organs
+				v:VisibleOrgan ::> {
+					v.calcLight();
+				}
+			]
+		}
+	}
+	
+	// update plant-level variables using info from individual organs
+	pb:PlantBase ::> {
+		pb.updateAbsorbedRadiation();
+		pb.updateBiomass();
+		pb.updateSurfaceArea();
+		pb.updateHeight();
+		pb.updateNbPhytomers();
+	}
+	
+	// update field-level variables
+	fb:FieldBase ::> {
+		fb.updateLai();
+	}
+	
+	// calculate light on reference sensor
+	ref:RefTile ::> {
+		if (refTile) {
+			ref.calcLight();
+		}
+	}
+]

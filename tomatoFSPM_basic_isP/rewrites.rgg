@@ -1,0 +1,106 @@
+import static modules_base.*;
+import static modules_organs.*;
+import static parameters.*;
+
+
+protected static void develop()
+[
+	// germination
+	pb:PlantBase rh:RH s:Seed, (s.shouldEmerge(pb)) ==> 
+		pb rh
+		r:RootSystem
+		{
+			r.initiate(pb);
+		}
+		
+		a:Apex
+		{
+			a.initiate(pb);
+			pb.emerge();
+		}
+	;
+	
+	// produce vegetative phytomer (primary shoot development)
+	a:Apex, (a[rank] == 0) ==>
+	
+		i:Internode
+		
+		RH(a[phylloAngle])
+		a
+		
+		{
+			i.initiate(a);
+			i[length] = 1*toCM;
+			a.increment();
+		}	
+	;
+	
+	// produce vegetative phytomer (primary shoot development)
+	a:Apex, (a[rank] > 0 && a.shouldProduceVegetative()) ==>
+	
+		i:Internode
+		println("new leaf")
+			
+		[ 
+			RL(INIT_LEAF_ANGLE[cultivar]) 
+			l:Leaf 
+			{
+				l.initiate(a);
+			}
+		]
+		
+		RH(a[phylloAngle])
+		a
+		
+		{
+			i.initiate(a);
+			a.increment();
+		}	
+	;
+	
+	// produce flower (indeterminate)
+	a:Apex, (a[rank] > 0 && a.shouldProduceGenerative()) ==>
+		i:Internode { i.initiate(a); }
+		
+		// create a truss every fourth phytomer
+		if ((i[rank] - FINAL_VEG_PHYT_NUM[a[cultivar]]) % 4 == 1) (
+			[ f:Flower { f.initiate(a); } ]
+		// otherwise create a leaf
+		) else (
+			if (lightPruning && ((i[rank] - FINAL_VEG_PHYT_NUM[a[cultivar]]) % 4 == 0)) (
+				// no leaf created = leaf was picked	
+			) else (
+				// create leaf
+				[
+					RL(INIT_LEAF_ANGLE[cultivar]) 
+					l:Leaf 
+					{ 
+						l.initiate(a);
+					}
+				]
+			)
+		)
+		
+		RH(a[phylloAngle])
+		a
+		{
+			a.increment();
+		}
+	;
+	
+	{ derive(); }
+	
+	i:Internode ::> {
+		i.calcInverseRank();
+	}
+	
+	l:Leaf ::> {
+		l.calcInverseRank();
+	}
+	
+	// plant death
+	pb:PlantBase, (plantDeath && pb[die]) ==>>;
+	
+	// ignore
+	temp ==> temp;
+]

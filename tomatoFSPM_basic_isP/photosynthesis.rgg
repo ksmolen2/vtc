@@ -1,0 +1,202 @@
+import static main.*;
+import static parameters.*;
+
+import static java.lang.Math.*;
+
+ 
+// Non-rectangular hyperbola as described by Thornley
+// ppfd - photosynthetic photon flux density (umol photons m-2 s-1)
+// (absorbed radiation per unit area)
+// amax - max photosynthesis rate (umol CO2 m-2 s-1)
+// alpha - leaf photosynthetic efficiency (umol CO2 umol-1 photons)
+// A - rate of photosynthesis  (umol CO2 m-2 s-1)
+static double calculatePS_Thornley(double ppfd, double amax, 
+	double alpha, double theta) {
+	
+	double a = theta;
+	double b = alpha*ppfd + amax;
+	double c = alpha*ppfd * amax;
+	
+	double fn = b - Math.sqrt(Math.pow(b,2) - 4*a*c);
+	double A = fn / (2*a);
+
+	return A;
+}
+
+
+// Farquhar-von Caemmerer-Berry model as in Yin and Struik (2009)
+
+// Functions used to calculate effect of temperature on parameters
+private static double peaked25(double p25, double Ep, double Sp, double Hdp, double Tleaf) {
+  return p25*exp((Tleaf - 298.15)*Ep/(298.15*8.31e-3*Tleaf))*(1 + exp((298.15*Sp - Hdp)/(8.31e-3*298.15)))/(1 + exp((Tleaf*Sp - Hdp)/(8.31e-3*Tleaf)));
+}
+
+private static double arrhenius25(double p25, double Ep, double Tleaf) {
+  return p25*exp((Tleaf - 298.15)*Ep/(298.15*8.31e-3*Tleaf));
+}
+
+// Analytical solution of cubic equation due to coupling of A, gs and gm
+private static double CalcAnC3(double gm, double gs0, double fvpd, double gb,
+                        double x2, double x1, double gamma_star, double Rd,
+                        double Ca) {
+  double a = gs0*(x2 + gamma_star) + (gs0/gm + fvpd)*(x1 - Rd);
+  double b = Ca*(x1 - Rd) - gamma_star*x1 - Rd*x2;
+  double c = Ca + x2 + (1/gm + 1/gb)*(x1 - Rd);
+  double d = x2 + gamma_star + (x1 - Rd)/gm;
+  double m = 1/gm + (gs0/gm + fvpd)*(1/gm + 1/gb);
+  double p = -(d + (x1 - Rd)/gm + a*(1/gm + 1/gb) + (gs0/gm + fvpd)*c)/m;
+  double q = (d*(x1 - Rd) + a*c + (gs0/gm + fvpd)*b)/m;
+  double r = (-a*b)/m;
+  double U = (2*pow(p,3) - 9*p*q + 27*r)/54.0;
+  double Q = (pow(p,2) - 3*q)/9.0;
+  double psi = acos(U/sqrt(pow(Q,3)));
+  double A = -2*sqrt(Q)*cos(psi/3) - p/3;
+  return A;
+}
+
+private static double CalcAnC4(double fvpd, double gs0, double gb, double Ca,
+                        double Cs_star,  double gamma_star,  double Rd,
+                        double alpha,  double x3,  double x2,
+                        double x1,  double gbs,  double Rm,
+                        double O2,  double a,  double b) {
+                          
+  double d = gs0*Ca - gs0*Cs_star + fvpd*Rd;
+  double m = fvpd - gs0/gb;
+  double g = (b - Rm - gamma_star*O2*gbs)*x1*m - ((alpha*gamma_star)/0.047 + 1)*x1*d + a*gbs*x1*(Ca*m - d/gb - Ca + Cs_star);
+  double f = (b - Rm - gamma_star*O2*gbs)*x1*d + a*gbs*x1*Ca*d;
+  double h = -(((alpha*gamma_star)/0.047 + 1)*x1*m + (a*gbs*x1*(m - 1))/gb);
+  double i = (b - Rm + gbs*x3 + x2*gbs*O2)*d + a*gbs*Ca*d;
+  double j = (b - Rm + gbs*x3 + x2*gbs*O2)*m + ((alpha*x2)/0.047 - 1)*d + a*gbs*(Ca*m - d/gb - Ca + Cs_star);
+  double l = ((alpha*x2)/0.047 - 1)*m - (a*gbs*(m - 1))/gb;
+  double p = (j - h + l*Rd)/l;
+  double q = (i + j*Rd - g)/l;
+  double r = -(f - i*Rd)/l;
+  double Q = (pow(p,2) - 3*q)/9;
+  double U = (2*pow(p,3) - 9*p*q + 27*r)/54;
+  double Psi = acos(U/sqrt(pow(Q,3)));
+  double An = -2*sqrt(Q)*cos((Psi + 4*pi)/3) - p/3;
+  return An;
+}
+
+private static double CalcCi(double gs0, double An, double Ca,
+                             double Ci_star, double Rd, double fvpd) {
+  double a = gs0;
+  double b = An - gs0*Ca - gs0*Ci_star + (An + Rd)*fvpd;
+  double c = -An*Ci_star + gs0*Ca*Ci_star - (An + Rd)*Ca*fvpd;
+  double Ci = (-b + sqrt(pow(b,2) - 4*a*c))/(2*a);
+  return Ci;
+}
+
+// Constants use in different calculations
+final static double pi = 3.14159265359;
+final static double Pair = 101; // kPa
+final static double emmisivity = 0.95;
+final static double boltzmann = 5.67e-8; // J/m2/s/K4
+final static double vap_heat_a = 56.897e3; // kJ/mol
+final static double vap_heat_b = -0.043e3; // kJ/mol/K
+final static double forcedA = 0.60;
+final static double forcedn = 0.5;
+final static double freeB = 0.5;
+final static double freem = 0.25;
+final static double diff = 20e-6; // m2/s
+final static double visc = 15e-6; // m2/s
+final static double Grcoef = 1.577e8; // 1/K/m3
+final static double R = 8.31; // J/mol/K
+final static double es0 = 0.61078; // kPa
+final static double es_k = 17.269;
+final static double Tzero = 273.15; // K
+final static double es_Tref = 237.3; // K
+final static double air_heat_capacity = 1200; // J/m3/K
+
+
+// C3 photosynthesis as described by Yin and Struik (2009) -> no energy balance
+class YinC3 {
+
+  // Parameters
+  double Sco25 = 2800;
+  double E_Sco = -24.46;
+  double Kmc25 = 270;
+  double E_Kmc = 80.99;
+  double Kmo25 = 165000;
+  double E_Kmo = 23.72;
+  double theta = 0.7;
+  double fpseudo = 0.1;
+  double fcyc = 0.131;
+  double a1 = 0.9;
+  double b1 = 0.15;
+  double E_Vcmax = 65.33;
+  double E_Jmax = 30;
+  double D_Jmax = 200;
+  double S_Jmax = 0.65;
+  double Rd25 = RD;//1.2;
+  double E_Rd = 46.39;
+  double gm25 = GM;//0.4;
+  double E_gm = 49.6;
+  double D_gm = 437.4;
+  double S_gm = 1.4;
+  double gs0 = 0.01;
+  double gb = 1.5;
+  double E_TPU = 53.1;
+  double D_TPU = 20.18;
+  double S_TPU = 0.65;
+
+
+  // Calculate net photosynthesis
+  double[] calc(double PAR, double Ca, double Tleaf, double VPD, double O2) {
+
+  	// assign values from fitting
+  	double k2ll = ALPHA_J;
+  	double Vcmax25 = VCMAX;
+  	double Jmax25 = JMAX;
+  	double TPU25 = TPU;
+
+    // Need Kelvin for temperature responses
+    Tleaf = Tleaf + 273.15;
+
+    // Calculate values of parameters at Tleaf
+    double Rd = arrhenius25(Rd25, E_Rd, Tleaf);
+    double Sco = arrhenius25(Sco25, E_Sco, Tleaf);
+    double Vcmax = arrhenius25(Vcmax25, E_Vcmax, Tleaf);
+    double Kmc = arrhenius25(Kmc25, E_Kmc, Tleaf);
+    double Kmo = arrhenius25(Kmo25, E_Kmo, Tleaf);
+    double Jmax = peaked25(Jmax25, E_Jmax, S_Jmax, D_Jmax, Tleaf);
+    double TPU = peaked25(TPU25, E_TPU, S_TPU, D_TPU, Tleaf);
+    double gm = peaked25(gm25, E_gm, S_gm, D_gm, Tleaf);
+
+    // Parameters for CO2 diffusion
+    double fvpd = max(1/(1/(a1 - b1*VPD) - 1),0.0);
+    double gamma_star = 0.5*O2/Sco;
+    double Ci_star = gamma_star - Rd/gm;
+
+    // Limitation by Rubisco
+    double x1_c = Vcmax;
+    double x2_c = Kmc*(1 + O2/Kmo);
+    double Ac = CalcAnC3(gm, gs0, fvpd, gb, x2_c, x1_c, gamma_star, Rd, Ca);
+
+    // Limitation by electron transport
+    double J = (k2ll*PAR + Jmax - sqrt(pow(k2ll*PAR + Jmax,2) - 4*theta*k2ll*Jmax*PAR))/(2*theta);
+    double x1_j = (J/4.0)*(1 - fpseudo/(1 - fcyc));
+    double x2_j = 2*gamma_star;
+    double Aj = CalcAnC3(gm, gs0, fvpd, gb, x2_j, x1_j, gamma_star, Rd, Ca);
+
+    // Limitation by TPU
+    double x1_p = 3.0*TPU;
+    double x2_p = -gamma_star;
+    double Ap = 3*TPU - Rd;
+
+    // Minimum of three potential rates
+    double An = min(Ac,min(Aj,Ap));
+
+    // Transpiration
+    double Ag = An + Rd;
+    double Ci = CalcCi(gs0, An, Ca, Ci_star, Rd, fvpd);
+    double Cc = Ci - An/gm;
+    double gs = gs0 + ((An + Rd)/(Ci - Ci_star))*fvpd;
+    double Tr = (gs*1.56*VPD)/Pair;
+    double WUE = An/Tr;
+
+    double[] out = {An, Tr, Ag, gs};
+    return out; 
+  }
+}
+

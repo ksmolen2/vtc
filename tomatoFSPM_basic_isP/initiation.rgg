@@ -1,0 +1,145 @@
+import static main.*;
+import static parameters.*;
+import static modules_base.*;
+import static modules_organs.*;
+import static modules_light.*;
+import static environment.*;
+
+
+static void initiate()
+[
+	{
+		clearConsole();
+		resetCounters();
+		calcHalt();
+		
+		// climate settings
+		
+		// import values from csv file
+		if (useClimateData) {
+			climateDataDaily = readClimateData(path+climateFileDaily);
+		}
+		
+		tempModel = TEMP_KASPRO;			// TEMP_CONST, TEMP_VAR, TEMP_KASPRO
+		radiationModel = RAD_KASPRO;		// RAD_CONST, RAD_VAR, RAD_KASPRO
+		dayLengthModel = DL_CONST;		// DL_CONST, DL_VAR
+		CO2Model = CO2_KASPRO;			// CO2_CONST, CO2_KASPRO
+		
+		calcClimate();
+	}
+	
+	Axiom ==> 
+	
+		{ 
+			cultivar = MERLICE;
+			phyllochr = PHYLLOCHRON[cultivar];
+		}
+	
+		temp
+			
+		// LIGHT SOURCES: SUN & SKY
+		[	
+			RH(90) lt:Translate
+			dr:DirectLight
+			dif:DiffuseLight
+		]
+		
+		// insert reference light sensor
+		if (refTile) ([
+			Translate(-2,-2,0) rt:RefTile {rt.initiate();}
+		])
+		
+		// insert cloner
+		if (infinite) (
+			GridClonerNode
+		)
+				
+		// start field setup containing plants arranged in rows
+		FieldBase
+		
+		// MULTIPLE PLANTS (specified by nbRows x nbPlants)
+		
+		{ int pbNb = 0; }
+		
+		for (int row:(0:nrRows-1)) ([
+			for (int pos:(0:nrPlants-1)) ([
+				if ((pos + row) % GAP_PLANTS == 0) (
+					Translate(PLANT_DIST * pos, ROW_DIST * row, 0)
+					
+					// plant
+					{ pbNb++; }
+					
+					pb:PlantBase
+					rh:RH(random(0,360))
+					s:Seed
+					{
+						s.initiate(cultivar, pb, pbNb);
+						pb.initiate(cultivar, s, pbNb, row+1, pos+1);
+						totalPlants++;
+					}
+				)
+			])
+			
+			{
+				cropWidth += ROW_DIST;
+			}
+		])
+		
+		{
+			cropLength = PLANT_DIST * nrPlants;
+		}
+		
+		{
+			// set light source locations and initiate
+			updateIncomingLight();
+			lt.translateX = 0.5 * cropWidth * (infinite?nrClones:1);
+			lt.translateY = -0.5 * cropLength * (infinite?nrClones:1);
+			lt.translateZ = 0;
+			dr.initiate(3 * Math.max(cropLength, cropWidth));
+			if (directLight) {
+				dr.update();
+			} else {
+				dr.deactivate();
+			}
+			dif.initiate(3 * Math.max(cropLength, cropWidth));
+			dif.update();
+			
+		}
+	;
+	
+	{
+		area = ROW_DIST * PLANT_DIST * totalPlants;
+		
+		println("cropWidth: " + cropWidth);
+		println("cropLength: " + cropLength);
+	}
+	
+	{  
+		if (infinite) {
+		
+			derive();
+			
+			GridClonerNode cl = first((* GridClonerNode *));
+			
+			// set the GridCloner properties
+			cl.setXCount(infinite?nrClones:1);
+			cl.setXDistance(cropLength);
+			cl.setYCount(infinite?nrClones:1);
+			cl.setYDistance(cropWidth);
+		}
+	
+	}
+]
+
+static void resetCounters()
+{
+	time = 0;
+	dayOfYear = startingDayOfYear;
+	
+	cropWidth = 0;
+	cropLength = 0;
+	
+	totalPlants = 0;
+	area = 0;
+
+}

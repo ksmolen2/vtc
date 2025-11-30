@@ -1,0 +1,93 @@
+import static parameters.*;
+
+/* merlice experiment 2 */
+{
+	DELAY[MERLICE] = 206.3;				// germination delay after start of simulation (in degreedays)
+	
+	PHYLLOCHRON[MERLICE] = 37.9;			// time between appearance of two PHYTOMERS (dd)
+	FINAL_VEG_PHYT_NUM[MERLICE] = 8;		// final number of main stem vegetative phytomers (!does not include the internode below cotyledons)
+	                                     
+	WMAX_ROOT[MERLICE] = 1000;			// maximum root system biomass (mg)
+	WMAX_FLOWER[MERLICE] = 82842;		// maximum flower/fruit biomass (mg)
+	WMAX_INT[MERLICE] = 1932;			// maximum internode biomass (mg)
+	WMAX_LEAF[MERLICE] = 5678;			// maximum leaf biomass (mg)
+	TE_ROOT[MERLICE] = 20000;			// root growth duration
+	TE_FLOWER[MERLICE] = 1707;			// flower/fruit growth duration
+	TE_INT[MERLICE] = 785;				// internode growth duration
+	TE_LEAF[MERLICE] = 694;				// leaf growth duration
+	TM_INT[MERLICE] = 499;
+	TM_LEAF[MERLICE] = 447;
+	TM_FLOWER[MERLICE] = 1168;
+	
+	MAX_WIDTH_INT[MERLICE] = 0.0115;		// maximum internode width (m)
+	K_WIDTH_INT[MERLICE] = 0.011;		// k logistic function
+	TM_WIDTH_INT[MERLICE]	= 295;		// inflection point logistic function
+	
+	MAX_LEN_INT[MERLICE] = 0.072;		// maximum internode length (m)
+	K_LEN_INT[MERLICE]	= 0.019;			// k logistic function
+	TM_LEN_INT[MERLICE] = 222;			// inflection point logistic function
+
+	MAX_LEN_LEAF[MERLICE] = 0.41;		// maximum leaf length (m)
+	K_LEN_LEAF[MERLICE]	= 0.014;			// k logistic function
+	TM_LEN_LEAF[MERLICE] = 232;			// inflection point logistic function
+	
+	A_LEN_LEAF[MERLICE] = 0.006;			// a power function (area-length relation)
+	G_LEN_LEAF[MERLICE] = 3.08;			// g power function
+
+	MAX_AREA_LEAF[MERLICE] = 628;		// maximum leaf area (cm2)
+	K_AREA_LEAF[MERLICE]	= 0.011;			// k logistic function
+	TM_AREA_LEAF[MERLICE] = 301;			// inflection point logistic function
+
+	AMAX[MERLICE] = 11.93;				// max photosynthesis rate (mmol m-2 s-1)
+	EFF[MERLICE] = 0.047;				// initial light use efficiency (initial slope of light response curve) (mol mol-1)
+	THETA[MERLICE] = 0.92;				// curvature
+	
+	AMAX_LOWER[MERLICE] = 10.28;			// max photosynthesis rate (mmol m-2 s-1)
+	EFF_LOWER[MERLICE] = 0.046;			// initial light use efficiency (initial slope of light response curve) (mol mol-1)
+	THETA_LOWER[MERLICE] = 0.92;			// curvature
+	
+	AMAX_UPPER[MERLICE] = 13.57;			// max photosynthesis rate (mmol m-2 s-1)
+	EFF_UPPER[MERLICE] = 0.048;			// initial light use efficiency (initial slope of light response curve) (mol mol-1)
+	THETA_UPPER[MERLICE] = 0.92;			// curvature
+	
+	LW_RATIO[MERLICE] = 1;				// ratio between leaf blade length and width
+	LW_RATIO_LF[MERLICE] = 2;			// ratio between leaflet blade length and width
+	
+	MAX_WIDTH[MERLICE] = 0.6;			// location on the leaf where width is maximal (fraction of length)
+	K1_WIDTH[MERLICE] = 2;				// parameter of getNormalizedLeafWidth2
+	K2_WIDTH[MERLICE] = 2.2;				// parameter of getNormalizedLeafWidth2
+
+	INIT_LEAF_ANGLE[MERLICE] = 23;		// initial insertion angle of all leaves (90 = horizontal)
+	
+	LEAF_ANGLE[MERLICE] = 81.5;			// (calc acc Chen) max insertion angle of all leaves (90 = horizontal)
+	K_LEAF_ANGLE[MERLICE] = 0.045;		// (calc acc Chen) k logistic function
+	
+	LEAF_CURVE[MERLICE] = 60;			// leaf curvature - angle between bottom and top of leaf blade (0 = flat)
+	K_LEAF_CURVE[MERLICE] = 0.15;		// k logistic function
+	TM_LEAF_CURVE[MERLICE] = 700;		// inflection point logistic function
+
+	NR_LEAFLET_PAIRS[MERLICE] = 3;		// number of leaflet pairs for leaf rank >= 3
+	
+	PETIOLE_FRACTION[MERLICE] = 0.22;	// fraction of leaf length
+	PETIOLULE1_FRACTION[MERLICE] = 0.37;	// fraction of leaflet length
+	PETIOLULE2_FRACTION[MERLICE] = 0.34;	// fraction of leaflet length
+	PETIOLULE3_FRACTION[MERLICE] = 0.15;	// fraction of leaflet length
+	PETIOLULET_FRACTION[MERLICE] = 0.27;	// fraction of leaflet length
+	LEAFLET1_ANGLE[MERLICE] = 105;
+	LEAFLET2_ANGLE[MERLICE] = 101;
+	LEAFLET3_ANGLE[MERLICE] = 93;
+	LEAFLET1_LIFT_ANGLE[MERLICE] = 0;
+	LEAFLET2_LIFT_ANGLE[MERLICE] = 0;
+	LEAFLET3_LIFT_ANGLE[MERLICE] = 0;
+	
+	SEGMENT1_FRACTION[MERLICE] = 0.15;	// rachis segment btw 1st and 2nd leaflet pair as fraction of length
+	SEGMENT2_FRACTION[MERLICE] = 0.2;	// rachis segment btw 2nd and 3rd leaflet pair as fraction of length
+	
+	PHYLLOTAXIS[MERLICE] = 138.75;		// angle between consecutive leaves along the stem
+	
+	SEED_MASS[MERLICE] = 600;			// seed endosperm mass in mg
+	
+	TB[MERLICE] = 4;						// base temperature for thermal time calculation
+	
+	RL_RATIO[MERLICE] = 1;	 			// Root/Leaf ratio
+}

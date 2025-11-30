@@ -1,0 +1,172 @@
+import static parameters.*;
+import static modules_organs.*;
+
+
+// =============================================================================
+// PLANT INSTANCING
+// =============================================================================
+
+module MasterPlant;
+
+module InstancePlant ==> { MasterPlant m = first((* MasterPlant *)); } m;
+
+
+// =============================================================================
+// WHOLE FIELD
+// =============================================================================
+
+module FieldBase extends Null
+{
+	double leafArea;				// leaf area
+	double lai;					// leaf area index			
+	
+	// calculate LAI
+	void updateLai() {
+		leafArea = sum((* PlantBase *)[leafArea]);
+		//lai = leafArea / getTotalArea();
+		lai = leafArea / area;
+	}
+	/*
+	double getTotalArea() {
+		long totalPlants = nrRows * nrPlants;
+		return  ROW_DIST * PLANT_DIST * totalPlants;
+	}
+	*/
+}
+
+
+// =============================================================================
+// WHOLE PLANT
+// =============================================================================
+
+
+module PlantBase
+{
+	double age;					// plant age (degree days)
+	double ageD;					// plant age (days)
+	int row;						// row number
+	int pos;						// position within row
+	int cultivar;				// plant cultivar
+	int plantNumber;				// plant number in the field
+	double absorbedRadiation;	// absorbed radiation (umol / s)
+	double accumulatedRadiation;// cumulative absorbed radiation (mol)
+	double fabs;					// fraction absorbed radiation of global radiation
+	double assimilated;			// assimilated carbon (umol CO2 / day)
+	double substrates;			// substrates available for growth (mg / day)
+	double reservePool;			// substrates reserves (mg)
+	double biomass;				// total plant biomass (all organs + reserves) (mg)
+	double biomLeaf;				// leaf biomass
+	double biomStem;				// stem biomass
+	double biomRoots;			// root system biomass
+	double yld;					// plant yield (biomass of reproductive organ)
+	double sinkStrength;			// total plant sink strength
+	double sr;					// plant source/sink ratio
+	double leafArea;				// total plant leaf area
+	double stemArea;				// total plant stem area
+	double height;				// plant height
+	int nbPhytomers;				// number of phytomers (with leaves and with trusses)
+	
+	boolean flowering;			// true if main stem switched to producing the inforescence
+	boolean die;					// true if plant should be killed
+	
+	// initiation of the plant
+	void initiate(int cultivar, Seed s, int i, int row, int pos)
+	{
+		this.cultivar = cultivar;
+		plantNumber = i;		
+		this.row = row;
+		this.pos = pos;
+		reservePool = s[endo];
+	}
+	
+	void emerge() {
+		nbPhytomers = 0;
+	}
+	
+	// calculate plant age
+	void calcAge() {
+		age = age + (tav - TB[cultivar]);
+		ageD++;
+	}
+	
+	// calculate substrates for growth based on assimilates acquired
+	double calcSourceStrength() {
+		assimilated = sum((* v:VisibleOrgan, (v[plantNumber] == plantNumber) *)[assimilated]);	// (umol CO2 / day)
+		
+		double RM_biom = RM_LF * biomLeaf + RM_INT * biomStem + RM_FR * yld + RM_RT * biomRoots;
+		
+		substrates = Math.max(0,(M_CO2 * assimilated * 1e-3 - RM_biom) * F_CO2 + reservePool);	// (mg / day)
+		
+		long nrSinks = count((* g:GrowingOrgan, (g[plantNumber] == plantNumber && g[sinkStrength] > 0) *));
+		if (nrSinks > 0) {
+			reservePool = 0;		// reset the reserve pool
+		}
+	}
+	
+	// calculate plant sink strength based on organ sink strengths 
+	double calcSinkStrength() {
+		// for carbon
+		double result = sum((* g:GrowingOrgan, (g[plantNumber] == plantNumber) *)[sinkStrength]);
+		if (result > 0) {
+			sinkStrength = result;
+		} else {
+			sinkStrength = 0.00001;
+		}
+		if (functional) {
+			sr = substrates / sinkStrength;
+			
+			if (sr < 0.01 && flowering == false) {
+				die = true;
+			}
+		} else {
+			sr = 1;		// is functional == false, height growth is not regulated by sr anymore
+		}
+	}
+	
+	// update plant absorbed radiation
+	void updateAbsorbedRadiation() {
+		double leafRad = sum((* l:Leaf, (l[plantNumber] == plantNumber) *)[abs]);
+		double stemRad = sum((* i:Internode, (i[plantNumber] == plantNumber) *)[abs]);
+		absorbedRadiation = leafRad;
+		
+		//fabs = absorbedRadiation / (leafArea * PPFD);
+		fabs = absorbedRadiation / ( ROW_DIST*PLANT_DIST * PPFD);
+		accumulatedRadiation += 1e-6 * (absorbedRadiation * dayLength*60*60);
+	}
+	
+	// update plant biomass and yield
+	void updateBiomass() {
+		biomass = reservePool + sum((* g:GrowingOrgan, (g[plantNumber] == plantNumber) *)[biomass]);
+		biomLeaf = sum((* l:Leaf, (l[plantNumber] == plantNumber) *)[biomass]);
+		biomStem = sum((* i:Internode, (i[plantNumber] == plantNumber) *)[biomass]);
+		yld = sum((* f:Flower, (f[plantNumber] == plantNumber) *)[biomass]);
+		biomRoots = sum((* r:RootSystem, (r[plantNumber] == plantNumber) *)[biomass]);
+	}
+	
+	// update plant leaf and stem area
+	void updateSurfaceArea() {
+		leafArea = sum((* l:Leaf, (l[plantNumber] == plantNumber) *)[area]);
+		stemArea = sum((* i:Internode, (i[plantNumber] == plantNumber) *)[area]);
+	}
+	
+	// update plant height
+	void updateHeight() {
+		height = sum((* i:Internode, (i[plantNumber] == plantNumber) *)[length]);
+	}
+	
+	void updateNbPhytomers() {
+		nbPhytomers = (* a:Apex, (a[plantNumber] == plantNumber) *)[rank] - 1;
+		
+	}
+}
+
+module RootBase extends GrowingOrgan
+{
+	int species;
+	static double RM;
+	
+	//calculates root mass from leaf mass
+	static double calcRM(double LM, int sp) {
+		return LM * RL_RATIO[sp];		
+	}
+}

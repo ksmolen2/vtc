@@ -1,0 +1,43 @@
+
+Name: modules_organs.rgg
+Content-Type: text/x-grogra-rgg; charset=windows-1252
+
+Name: updates.rgg
+Content-Type: text/x-grogra-rgg; charset=windows-1252
+
+Name: parametersMerlice.rgg
+Content-Type: text/x-grogra-rgg; charset=UTF-8
+
+Name: modules_base.rgg
+Content-Type: text/x-grogra-rgg; charset=windows-1252
+
+Name: parameters.rgg
+Content-Type: text/x-grogra-rgg; charset=windows-1252
+
+Name: rewrites.rgg
+Content-Type: text/x-grogra-rgg; charset=windows-1252
+
+Name: environment.rgg
+Content-Type: text/x-grogra-rgg; charset=windows-1252
+
+Name: chart.rgg
+Content-Type: text/x-grogra-rgg; charset=windows-1252
+
+Name: graph.xml
+Content-Type: application/x-grogra-graph+xml
+
+Name: modules_light.rgg
+Content-Type: text/x-grogra-rgg; charset=windows-1252
+
+Name: project.gs
+Content-Type: application/x-grogra-registry+xml
+
+Name: main.rgg
+Content-Type: text/x-grogra-rgg; charset=windows-1252
+
+Name: photosynthesis.rgg
+Content-Type: text/x-grogra-rgg; charset=windows-1252
+
+Name: initiation.rgg
+Content-Type: text/x-grogra-rgg; charset=windows-1252
+

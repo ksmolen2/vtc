@@ -1,0 +1,372 @@
+/* 
+ * Tomato FSP model
+ * Adaptation of the FSPM_BASIC from Jochem Evers for tomato
+ *
+ * Notes:
+ * without side shoots, they are considered removed
+ * greenhouse construction and artificial lighting not included in this version
+ *
+ * Buttons:
+ * press run - one simulation step (one day)
+ * select Run, press run (1x) - run the model for the whole simulated period
+ * press run2update - run the model from seed until the plant structure at transplant
+ * press run2filePlantEval - run the model and save the model outputs at plant level in a file
+ * press run2fileLeafLight - run the model and save the light-related outputs at leaf level in a file
+ * 
+ * Katarina Smolenova, WUR, 2022 - 2025
+ */
+
+
+import static parameters.*;
+import static modules_base.*;
+import static modules_organs.*;
+import static modules_light.*;
+import static initiation.*;
+import static rewrites.*;
+import static updates.*;
+import static photosynthesis.*;
+import static environment.*;
+import static chart.*;
+
+import de.grogra.pf.boot.Main;
+import java.io.PrintWriter;
+import java.io.FileWriter;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.util.Arrays; 
+import java.util.ArrayList;
+
+
+protected void init()
+{
+	//setSeed(500);
+	
+	// the chart is initialized
+	initChart();
+
+	// global variables init & Axiom
+	initiate();
+}
+
+public void run2update()
+{
+	for (apply(27)) {
+		run();
+	}
+}
+
+
+public void run()
+{
+	if (time != halt) {
+				
+		step();
+		
+	} else {
+		println("End of simulation (harvest)!");
+	}
+}
+
+protected void step()
+{
+	println("===========================");
+	
+	println(//time + " days, "
+		(time+1) + " days, "	// simulation step (starts with 1)
+		+ "DOY " + dayOfYear
+		+ ", DL " + 0.1*Math.round(10*dayLength) + " h, "
+		+ "PPFD " + Math.round(PPFD) + " umol/m2/s, "
+		+ "temp " + 0.1*Math.round(10*tav) + " C"
+	);
+	
+	dd = ((* pb:PlantBase, (pb[plantNumber] == MASTER_NR) *)[age]);
+	println("dd: " + dd);
+	
+	computeLM();
+	
+	develop();
+	derive();
+	renew();
+	derive();
+	
+	println("LAI: " + ((* FieldBase *)[lai]));
+	println("Nb leaves: " + count((* l:Leaf, (l[plantNumber] == MASTER_NR) *)));
+	println("stem height: " + sum((* PlantBase *)[height]));
+	
+	updateChart();
+	
+	
+	if (render) {
+		if      (time < 10)		{makeRenderedImage(path+"export\\step00"+time+".png", 1600, 1600);}
+		else if (time < 100)	{makeRenderedImage(path+"export\\step0" +time+".png", 1600, 1600);}
+		else             		{makeRenderedImage(path+"export\\step"  +time+".png", 1600, 1600);}
+	}
+	
+	if (export3D) {
+		if      (time < 10)		{export3DScene(path+"export\\3d\\"+"step00"+time+".ply", "ply", first((* p:PlantBase, (p[plantNumber] == MASTER_NR) *)));}
+		else if (time < 100)	{export3DScene(path+"export\\3d\\"+"step0" +time+".ply", "ply", first((* p:PlantBase, (p[plantNumber] == MASTER_NR) *)));}
+		else             		{export3DScene(path+"export\\3d\\"+"step"  +time+".ply", "ply", first((* p:PlantBase, (p[plantNumber] == MASTER_NR) *)));}
+	}
+}
+
+static void calcHalt() 
+{
+	int h = HARVEST - 1;
+	if (h > halt) { 
+		halt = h; 
+	}
+}
+
+// update organ attributes as measured at harvest one
+static void updateStructure()
+[
+	{ 
+		plantDataHarvest = readPlantData(path+plantFile); 
+	
+		double intDMC = 0.06;
+		double leafDMC = 0.13;
+	}
+	
+	// update internode properties
+	i:Internode ::> {
+		int rank = i[rank]; 
+		
+		// length
+		if (!plantDataHarvest[rank][7].isEmpty()) {
+			i[length] = Double.parseDouble(plantDataHarvest[rank][7]) * toCM;	// cm -> m
+		}
+		
+		// width
+		if (!plantDataHarvest[rank][8].isEmpty()) {
+			i[width] = Double.parseDouble(plantDataHarvest[rank][8]) * toMM;	// mm -> m
+		}
+		
+		// dw 
+		if (!plantDataHarvest[rank][19].isEmpty()) {
+			i[biomass] = intDMC * Double.parseDouble(plantDataHarvest[rank][19]) * 1000;	// g -> mg
+		}
+	}
+	
+	// update leaf properties
+	l:Leaf ::> {
+		int rank = l[rank];
+		
+		// length
+		if (!plantDataHarvest[rank][10].isEmpty()) {
+			l[length] = Double.parseDouble(plantDataHarvest[rank][10]) * toCM;	 // cm -> m
+		}
+		
+		// width
+		if (!plantDataHarvest[rank][11].isEmpty()) {
+			l[width] = Double.parseDouble(plantDataHarvest[rank][11]) * toCM;	// cm -> m
+		}
+		
+		// area
+		if (!plantDataHarvest[rank][17].isEmpty()) {
+			l[area] = Double.parseDouble(plantDataHarvest[rank][17]) / 10000;	// cm2 -> m2
+		}
+		
+		// dw
+		if (!plantDataHarvest[rank][18].isEmpty()) {
+			l[biomass] = leafDMC * Double.parseDouble(plantDataHarvest[rank][18]) * 1000;	// g -> mg
+		}
+	}
+]
+
+// read input parameters from a csv file
+static String[][] readPlantData(String input) throws FileNotFoundException, IOException
+{
+	ArrayList data = new ArrayList();
+	
+	BufferedReader br = new BufferedReader(new FileReader(input));
+	String line = "";
+	String csvSplitBy = ";";	// separator
+	
+	// skip first line (header)
+	// genotype;harvesting;date;position_column;position_row;rank;note;int_length;int_diameter;int_diameter2;leaf_length;leaf_width;br_angle;ph_angle;nb_flowers;nb_fruits;truss_length;leaf_area;leaf_fw;int_fw;truss_fw
+	line = br.readLine();
+	// second line
+	// Merlice;1;12-10-2021;AO;31;0;cotyledons;3.4;;;;;;;;;;;;0.54;
+	line = br.readLine();
+	
+	println("read plant data");
+	
+	while (line != null) {
+		
+		println(line);
+		line = line.replaceAll("-", "");
+		data.add(line.split(csvSplitBy, -1));	// -1: include empty cells
+		line = br.readLine();
+	}
+	
+	return (String[][]) data.toArray(new String[data.size()][]);
+}
+
+// run and save outputs to file
+public void run2filePlantEval()
+{
+	// set the output file, where the computed values should be stored
+	PrintWriter out = new PrintWriter(new FileWriter(path+"output\\tomato_export.csv", false));
+	
+	
+	out.println("time_step,day_of_year,day_length,thermTime,absorbed_light,tot_assimilates,tot_biomass,tot_leafBiomass,tot_stemBiomass,tot_yield,nb_phytomers,nb_leaves,nb_trusses,height,tot_leafArea");
+	// simulate until end is reached
+	for (apply(halt)) {
+		
+		step();
+		derive();
+		
+		// output: 
+		// thermal time
+		double thT = sum((* PlantBase *)[age]);					// dd
+		// total absorbed light
+		double abs = sum((* PlantBase *)[absorbedRadiation]);		// umol / s
+		// total leaf area
+		double lfArea = sum((* PlantBase *)[leafArea]);			// m2
+		// total assimilates
+		double ass = sum((* PlantBase *)[assimilated]);			// umol CO2 / day
+		// total biomass
+		double bms = sum((* PlantBase *)[biomass]);				// mg
+		// total leaf biomass
+		double bmsL = sum((* PlantBase *)[biomLeaf]);				// mg
+		// total stem biomass
+		double bmsS = sum((* PlantBase *)[biomStem]);				// mg
+		// yield (truss biomass)
+		double yld = sum((* PlantBase *)[yld]);					// mg
+		// nbPhytomers
+		long nbP = count((* i:Internode, (i[rank] > 0) *));
+		// nbLeaves
+		long nbL = count((* Leaf *));
+		// nbTrusses
+		long nbT = count((* Flower *));
+		// stem height
+		double stH = sum((* PlantBase *)[height]);
+		
+		out.println(time + "," + dayOfYear + "," + dayLength + "," + thT + "," + abs + "," + ass + "," + bms + "," + bmsL + "," + bmsS + "," + yld + "," + nbP + "," + nbL + "," + nbT + "," + stH + "," +lfArea);
+		
+	}
+	
+	out.flush();
+	out.close();
+	
+}
+
+
+
+public void run2fileLeafLight() throws FileNotFoundException, IOException
+{
+
+	// set the output file, where the computed values should be stored
+	PrintWriter out = new PrintWriter(new FileWriter(path+"output\\fabs.csv", false));
+	
+	out.println("rank;rankInverse;fabs;abs;absm2;assimilated");
+	
+	[
+		l:Leaf ::> {
+			out.println(l[rank] + ";" + l[rankInv] + ";" + l[fabs] + ";" + l[abs] + ";" + l[absm2] + ";" + l[assimilated]);
+		}
+	]
+	
+	out.flush();
+	out.close();
+}
+
+
+//==============================================================================
+// EXECUTED WHEN THE MODEL IS RUN HEADLESS
+//==============================================================================
+
+protected void startup()
+{
+	super.startup();
+	if (Main.getProperty("headless") != null) {
+		runLater(null);
+	}
+}
+
+protected void run(Object info)
+{
+	reset();
+	
+	init();
+	reset();
+	
+	//println("input is " + Main.getArg(0));
+	//println("output is " + Main.getArg(1));
+	runHeadless();
+    System.exit(0);
+}
+
+
+// main method for the headless version
+protected void runHeadless()
+{
+	// set the output file, where the computed values should be stored
+	PrintWriter out = new PrintWriter(new FileWriter(Main.getArg(1) +"outp.csv", false));	// headless
+	
+	// at the start initiate and clear all tables
+	if (time == 0) {
+		updateParameters();	// use inputs from the csv file
+	}
+	// simulate until end is reached
+	for (apply(halt)) {
+		
+		step();
+		derive();
+		
+		// total absorbed light
+		double x_absL = sum((* PlantBase *)[absorbedRadiation]);
+		// total shoot biomass
+		double x_b = sum((* PlantBase *)[biomass]);
+		// total leaf biomass
+		double x_bL = sum((* PlantBase *)[biomLeaf]);
+		// total yield
+		double x_y = sum((* PlantBase *)[yld]);
+		
+		out.println("t," + time + ",x," + x_absL + ",x_b," + x_b + ",x_bL," + x_bL + ",x_y," + x_y);
+		
+	}
+	
+	out.flush();
+	out.close();
+}
+
+// update parameter changes based on the input values from csv files
+void updateParameters()
+{
+	if (headless) {
+		// read values of parameters from the input csv file 
+		readCSV(Main.getArg(0));
+	}
+}
+
+// read input parameters from a csv file
+protected void readCSV(String input) throws FileNotFoundException, IOException
+{
+	BufferedReader br = null;
+	String line = "";
+	String cvsSplitBy = ",";	// use comma as separator
+	
+	br = new BufferedReader(new FileReader(input));
+	
+	line = br.readLine();
+	
+	while (line != null) {
+		
+		String[] par = line.split(cvsSplitBy);
+		
+		if (par[0].equals("klen")) {
+			K_LEN_INT[MERLICE] = Double.parseDouble(par[1]);
+		} else if (par[0].equals("maxlen")) {
+			MAX_LEN_INT[MERLICE] = Double.parseDouble(par[1]);
+		} else if (par[0].equals("phyllochron")) {
+			PHYLLOCHRON[MERLICE] = Double.parseDouble(par[1]);
+		} else if (par[0].equals("tmlen")) {
+			TM_LEN_INT[MERLICE] = Double.parseDouble(par[1]);
+		}
+		
+		line = br.readLine();
+	}
+}

@@ -1,0 +1,115 @@
+import static main.*;
+import static modules_base.*;
+import static parameters.*;
+
+
+// =============================================================================
+// LIGHT SOURCES
+// =============================================================================
+
+// light source module
+module SingleLight(double power) extends LightNode().(
+	setLayer(15), 
+	setLight(new DirectionalLight().(
+		setPowerDensity(power), 
+		setVisualize(seeRays), 
+		getColor().set(new RGBColor(1,1,1)))))
+;
+
+// direct light source (sun)
+module DirectLight
+{
+	float mod;
+	float[] power = new float[n]; 	// Radiation intensity for every node
+	float[] beta = new float[n]; 	// Solar elevation angle
+	float[] azimuth = new float[n]; 	// Solar azimuth angle
+	double dist;						// distance of the light sources from the center of the scene
+	
+	void initiate(double d) {
+		dist = Math.max(10,infinite?d*nrClones:d);
+	}
+	
+	void update() {
+		for (int j=0; j <= n-1; j++) {			
+			beta[j] = betaAzimSdr[0][j];
+			azimuth[j] = betaAzimSdr[1][j];
+			power[j] = 1e6 * 0.55 * 4.55 * betaAzimSdr[2][j] / (dayLength*60*60);
+		}
+	}
+	void deactivate() {
+		for (int j=0; j <= n-1; j++) {			
+			beta[j] = betaAzimSdr[0][j];
+			azimuth[j] = betaAzimSdr[1][j];
+			power[j] = 0;
+		}
+	}
+} 	
+==> AdjustLU RL(90) RU(90*mod)
+[for (int j=0; j <= n-1; j++) (
+	[RU(azimuth[j]) RL(-beta[j]) M(dist) RL(180) s:SingleLight(power[j])] 
+) ]
+;
+
+// diffuse light source (sky)
+module DiffuseLight
+{
+	float power;
+	double dist;						// distance of the light sources from the center of the scene
+	void initiate(double d) {
+		dist = Math.max(10,infinite?d*nrClones:d);
+	}
+	void update() {
+		if (radiationModel == RAD_CONST) {
+			power = DR_FIXED;
+		} else if (radiationModel == RAD_KASPRO) {
+			power = parav;
+		} else if (radiationModel == RAD_VAR) {
+			power = 1e6 * 0.55 * 4.55 * DailyDiffuseRadiation / (dayLength*60*60);
+			if (PPFD <= DR_FIXED) {
+				power = DR_FIXED * FractionDiffuseLightDaily;
+			}
+		}
+	}
+}
+==>
+	RL(90)
+	
+	[ for (int i = 1; i<=12; i++) ([ RU(i*360/12) RL(-11.7) M(dist) RL(180) SingleLight(power*0.003218)] )]
+	[ for (int i = 1; i<=12; i++) ([ RU(20) RU(i*360/12) RL(-34.2) M(dist) RL(180) SingleLight(power*0.01163)] )]
+	[ for (int i = 1; i<=12; i++) ([ RU(40) RU(i*360/12) RL(-54.9) M(dist) RL(180) SingleLight(power*0.019812)] )]
+	[ for (int i = 1; i<=12; i++) ([ RU(60) RU(i*360/12) RL(-71.1) M(dist) RL(180) SingleLight(power*0.023022)] )]
+	[ for (int i = 1; i<=12; i++) ([ RU(80) RU(i*360/12) RL(-82.8) M(dist) RL(180) SingleLight(power*0.018522)] )]
+	[ for (int i = 1; i<=12; i++) ([ RU(80) RU(i*360/12) RL(-89.1) M(dist) RL(180) SingleLight(power*0.007096)])]
+;
+
+// reference sensor, to be placed outside the canopy to measure incoming radiation
+module RefTile
+{
+	double length;
+	double width;
+	double area;
+	double abs;						// absorbed radiation (umol / s)
+	double absm2;					// absorbed radiation per unit area (umol / m2 / s)
+	
+	// initiation of the tile
+	void initiate()
+	{
+		length = 0.5;
+		width = 0.5;
+		area = length * width;
+	}
+	
+	// calculate light absorption
+ 	void calcLight()
+	{
+		if (area > 0) {
+			abs = LM.getAbsorbedPower3d(this).integrate();
+						
+			absm2 = abs / area;
+		}
+	}
+}
+==> 
+	RL(-90)
+	Parallelogram(length,width).(setShader(BLACK))
+;

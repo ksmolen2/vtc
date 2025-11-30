@@ -1,0 +1,163 @@
+import static main.*;
+import static modules_base.*;
+import static modules_organs.*;
+import static parameters.*;
+
+static void initChart()
+{
+	dlData.clear().setColumnKey(0, "DL");
+	ppfdData.clear().setColumnKey(0, "PPFD").setColumnKey(1, "transmPPFD").setColumnKey(2, "PPFD_Kaspro");
+	lightData.clear().setColumnKey(0, "Light").setColumnKey(1, "Assimilates");
+	tempData.clear().setColumnKey(0, "Temp");
+	thTempData.clear().setColumnKey(0, "ThTime");
+	co2Data.clear().setColumnKey(0, "CO2");
+	leavesDwData.clear().setRowKey(0,"DW");
+	leavesGrData.clear().setRowKey(0,"GR");
+	leavesLenData.clear().setRowKey(0,"Length");
+	leavesAreaData.clear().setRowKey(0,"Area");
+	intGrData.clear().setRowKey(0,"GR");
+	intDwData.clear().setRowKey(0,"DW");
+	trussDwData.clear().setRowKey(0,"DW");
+	intLenData.clear().setRowKey(0,"Length");
+	plantHeightData.clear().setRowKey(0,"Height");
+	plantLeafAreaData.clear().setRowKey(0,"Area");
+	totPlantDwData.clear().setRowKey(0,"DW");
+	totLeavesDwData.clear().setRowKey(0,"DW");
+	totStemDwData.clear().setRowKey(0,"DW");
+	totTrussesDwData.clear().setRowKey(0,"DW");
+	plantNbLeavesData.clear().setRowKey(0,"NbLeaves");
+	
+	for (int i = 0; i < 2*MAX_RANK_CHART; i++) {
+		if (i < MAX_RANK_CHART) {
+			leavesGrData.setColumnKey(i, "AGR(l" + (i+1) + ")");
+		} else {
+			leavesGrData.setColumnKey(i, "PGR(l" + (i+1-MAX_RANK_CHART) + ")");
+		}
+		
+		if (i < MAX_RANK_CHART) {
+			intGrData.setColumnKey(i, "AGR(l" + (i+1) + ")");
+		} else {
+			intGrData.setColumnKey(i, "PGR(l" + (i+1-MAX_RANK_CHART) + ")");
+		}
+	}
+	
+	chart(dlData, XY_PLOT);
+	chart(ppfdData, XY_PLOT);
+	chart(lightData, XY_PLOT);
+	chart(tempData, XY_PLOT);
+	chart(thTempData, XY_PLOT);
+	chart(co2Data, XY_PLOT);
+	chart(leavesDwData, XY_PLOT);
+	chart(leavesGrData, XY_PLOT);
+	chart(leavesLenData, XY_PLOT);
+	chart(leavesAreaData, XY_PLOT);
+	chart(intGrData, XY_PLOT);
+	chart(intDwData, XY_PLOT);
+	chart(intLenData, XY_PLOT);
+	chart(trussDwData, XY_PLOT);
+	chart(plantHeightData, XY_PLOT);
+	chart(plantLeafAreaData, XY_PLOT);
+	chart(totPlantDwData, XY_PLOT);
+	chart(totLeavesDwData, XY_PLOT);
+	chart(totStemDwData, XY_PLOT);
+	chart(totTrussesDwData, XY_PLOT);
+	chart(plantNbLeavesData, XY_PLOT);
+}
+
+static void updateChart()
+{	
+	// CLIMATE VARIABLES
+	
+	dlData.addRow()
+		.set(0, dayLength)
+	;
+	
+	double PPFDtransm = PPFD*0.7;
+	
+	ppfdData.addRow()
+		.set(0, PPFD)
+		.set(1, PPFDtransm)
+		.set(2, parav)
+	;
+	
+	tempData.addRow()
+		.set(0, tav)
+	;
+	
+	thTempData.addRow()
+		.set(0, first((* PlantBase *)[age]))
+	;
+	
+	co2Data.addRow()
+		.set(0, co2av)
+	;
+	
+	// PLANT VARIABLES
+	[
+		// select a specific plant base if there are more plants simulated 
+		pb:PlantBase, (pb[plantNumber] == MASTER_NR) ::> {
+			lightData.addRow()
+				.set(pb[plantNumber], pb[absorbedRadiation]);
+				
+			plantHeightData.addRow()
+				.set(pb[plantNumber], pb[height]*100);		// in cm
+				
+			plantLeafAreaData.addRow()
+				.set(pb[plantNumber], pb[leafArea]*10000);	// in cm2
+				
+			totPlantDwData.addRow()
+				.set(pb[plantNumber], pb[biomass]/1000);		// in g
+			
+			totLeavesDwData.addRow()
+				.set(pb[plantNumber], pb[biomLeaf]/1000);	// in g
+				
+			totStemDwData.addRow()
+				.set(pb[plantNumber], pb[biomStem]/1000);	// in g
+				
+			totTrussesDwData.addRow()
+				.set(pb[plantNumber], pb[yld]/1000);			// in g
+			
+			plantNbLeavesData.addRow()
+				.set(0, count((* pb (-->)* Leaf *)))
+			;
+		}
+	]
+	
+	// ORGAN VARIABLES
+	
+	Dataseries seriesLGR = leavesGrData.addRow();
+	Dataseries seriesLDW = leavesDwData.addRow();
+	Dataseries seriesLL = leavesLenData.addRow();
+	Dataseries seriesLA = leavesAreaData.addRow();
+		
+	[ l:Leaf, (l[pb][plantNumber] == MASTER_NR) ::> {
+		if (l[rank] > 0 && l[rank] <= MAX_RANK_CHART) {
+			seriesLGR.set(l[rank]-1, l[sinkStrength]); 				// pgr
+			seriesLGR.set(MAX_RANK_CHART + l[rank]-1, l[growth]);		// agr
+		}
+		
+		seriesLDW.set(l[rank], l[biomass]/1000);	// in g 
+		seriesLL.set(l[rank], l[length]*100);	// in cm 
+		seriesLA.set(l[rank], l[area]*10000);	// in cm2
+	} ]
+	
+	Dataseries seriesIDW = intDwData.addRow();
+	Dataseries seriesIL = intLenData.addRow();
+	Dataseries seriesIGR = intGrData.addRow();
+	
+	[ i:Internode ::> {
+		if (i[rank] > 0 && i[rank] <= MAX_RANK_CHART) {
+			seriesIGR.set(i[rank]-1, i[sinkStrength]); 
+			seriesIGR.set(MAX_RANK_CHART + i[rank]-1, i[growth]);  
+		}
+		
+		seriesIDW.set(i[rank], i[biomass]/1000);	// in g
+		seriesIL.set(i[rank], i[length]*100);	// in cm
+	} ]
+	
+	Dataseries seriesTDW = trussDwData.addRow();
+	
+	[ t:Flower ::> {
+		seriesTDW.set(t[rank], t[biomass]/1000);	// in g
+	} ]
+}

@@ -1,0 +1,842 @@
+import static parameters.*;
+import static modules_base.*;
+import static modules_light.*;
+import static photosynthesis.*;
+ 
+ 
+// =============================================================================
+// PLANT ORGANS - GENERIC
+// =============================================================================
+
+
+module Organ(super.length, PlantBase pb) extends M(length)
+{	
+	int cultivar;		// tomato cultivar
+	int plantNumber;		// plant number in the fields
+	int rank;			// phytomer rank
+	int rankInv;			// inverse phytomer rank (counted from apex down)
+	double age;			// organ age (dd)
+	double agePrevious;	// organ age in the previous time step (dd)
+	double ageWait;		// organ age including waiting for release
+	double ageD;			// organ age (days)
+	double delay;		// delay between organ initation and appearance
+	
+	// calculate organ age
+	void calcAge() {
+		ageWait += (tav - TB[cultivar]);
+		if (ageWait >= delay) {
+			agePrevious = age;	
+			age += (tav - TB[cultivar]);
+			ageD++;
+		}
+	}
+}
+
+// parent module for all organs that grow
+module GrowingOrgan extends Organ
+{
+	double area;				// area (m2)
+	double wmax;				// potential biomass (mg)
+	double te;				// growth duration (dd)
+	double tm;				// age at maximum growth (dd)
+	double growth;			// biomass gain per time step (mg)
+	double biomass;			// biomass (mg)
+	double frBio;			// fraction of potential biomass
+	double sinkStrength;		// potential growth rate (mg substrate / dd)
+	double relativeSinkStrength;	// sink strength fration of total plant sink strength
+	double assimilatesAvailable;	// assimilates available for growth
+	double assimilatesAllocated;	// assimilates allocated
+	
+	// calculate sink strength (based on Yin et al. 2003)
+	void calcSinkStrength() {
+		
+		if (this instanceof RootBase) {
+			double LM = sum((* l:Leaf, (l[plantNumber] == plantNumber) *)[biomass]);
+			RootBase.RM = RootBase.calcRM(LM, cultivar);
+			sinkStrength = Math.max(0, RootBase.RM - biomass);
+		} else {
+			double dt = age-agePrevious;
+			double maxSinkStrength = wmax*((2*te-tm)/(te*(te-tm)))*(tm/te)**(tm/(te-tm));
+			double result = maxSinkStrength/(1-RG) * ((te-age)/(te-tm))*(age/tm)**(tm/(te-tm));
+			
+			if (age > te) {
+				sinkStrength = 0;
+			} else {
+				sinkStrength = result * dt;
+			}
+		}
+	}
+	
+	// calculate assimilate allocation and actual growth
+	void calcAssimilateAllocation() {
+		
+		relativeSinkStrength = sinkStrength / pb[sinkStrength];
+		assimilatesAvailable = relativeSinkStrength * pb[substrates];
+		
+		if (assimilatesAvailable > sinkStrength) {
+			assimilatesAllocated = sinkStrength;
+			if (functional) {
+				pb[reservePool] += assimilatesAvailable - sinkStrength;
+			}
+		} else {
+			assimilatesAllocated = assimilatesAvailable;
+		}
+		
+		if (functional) {
+			growth = (1-RG) * assimilatesAllocated;		// source limitation when functional == true
+		} else {
+			growth = (1-RG) * 0.5*sinkStrength;			// no source limitation when functional == false
+		}
+		
+		biomass += growth;
+		frBio = 0.01* Math.round(100 * biomass / wmax);
+		
+	}
+}
+
+// parent module for all organs that can absorb light and photosynthesize
+module VisibleOrgan extends GrowingOrgan
+{
+	double abs;					// absorbed radiation (umol / s)
+	double absm2;				// absorbed radiation per unit area (umol / m2 / s)
+	double fabs;					// fraction of globRad absorbed
+	double photosynthesisRate;	// rate of photosynthesis  (umol CO2 / m2 / s)
+	double assimilated;			// assimilates acquired (umol CO2 / day)
+	
+	// calculate light absorption
+ 	void calcLight() {
+ 			
+		abs = LM.getAbsorbedPower(this).integrate();
+		
+		if (area > 0.00001) {
+			absm2 = abs/area;
+			
+			if (refTile) {
+				RefTile rt = first((* RefTile *));
+				double ref = rt[absm2];
+				fabs = absm2 / ref;
+			} else {
+				fabs = -1;
+			}
+		} else {
+			absm2 = 0;
+			fabs = 0;
+		}
+ 	}
+ 	
+ 	void calcPhotosynthesis() {
+ 		
+ 		if (thornley) {
+			// simple model (no layers)
+			if (simpleModelPS) {
+				// avg
+				//photosynthesisRate = calculatePS_Thornley(absm2, amax[cultivar], eff[cultivar], theta[cultivar]);
+				// upper layer
+				photosynthesisRate = calculatePS_Thornley(absm2, AMAX_UPPER[cultivar], EFF_UPPER[cultivar], THETA_UPPER[cultivar]);
+				//println(absm2  + ", " + amax[cultivar] + ", " + eff[cultivar] + ", " + theta[cultivar]);
+			
+			} else {
+				// lower layer
+				if (rankInv >= THRESHOLD_RANK) {	// top > bottom counting
+					photosynthesisRate = calculatePS_Thornley(absm2, AMAX_LOWER[cultivar], EFF_LOWER[cultivar], THETA_LOWER[cultivar]);
+				// upper layer
+				} else {
+					photosynthesisRate = calculatePS_Thornley(absm2, AMAX_UPPER[cultivar], EFF_UPPER[cultivar], THETA_UPPER[cultivar]);
+				}
+			}
+		} else {
+			YinC3 modelC3 = new YinC3();
+			double[] output;
+			output = modelC3.calc(absm2, co2av, tav, VPD, O2);
+			photosynthesisRate = Math.max(0,output[2]);	
+			if(photosynthesisRate != photosynthesisRate) {		// means: if photosynthesisRate is NaN
+				println("ERROR: PHOTOSYNTHESIS DIV/0");
+				photosynthesisRate=0;
+			}
+		}
+ 		
+		assimilated = photosynthesisRate * area * dayLength*60*60;
+ 	}
+		
+	// calculate organ dimensions (implemented in specific organ modules)
+	void calcDimensions();	
+	
+	protected Shader getOrganShader() {
+		return getMeasOP();
+	}
+	
+	protected Shader getMeasOP() {
+		// simple model
+		if (simpleModelOP) {
+			return MERLICE_AVG_U_AS;
+			
+		// complex model (two layers)
+		} else {
+			// lower layer
+			if (rankInv >= THRESHOLD_RANK) {	// top > bottom counting
+				return MERLICE_AVG_L_AS;
+				
+				
+			// upper layer
+			} else {
+				return MERLICE_AVG_U_AS;
+			}
+		}
+	}
+}
+
+
+// =============================================================================
+// PLANT ORGANS
+// =============================================================================
+
+
+// =============================================================================
+// INTERNODE 
+
+module Internode extends VisibleOrgan {
+	
+	double width;						// internode width/diameter (m)
+	double sil;							// stem ratio length / biomass (mm/mg)
+	double increment;					// length increment per time step
+	
+	// internode initiation
+	void initiate(Apex a) {
+		cultivar = a[cultivar];
+		pb = a[pb];
+		plantNumber = a[plantNumber];
+		rank = a[rank];
+		length = 0;
+		wmax = WMAX_INT[cultivar];
+		te = TE_INT[cultivar];
+		tm = TM_INT[cultivar];
+	}
+	
+	void calcInverseRank() {
+		rankInv = (pb[nbPhytomers] - rank) + 1;
+	}
+	
+	// calculate dimensions
+	void calcDimensions()
+	{
+		if (rank > 0) {
+			
+			double maxL = MAX_LEN_INT[cultivar];
+			double kL = K_LEN_INT[cultivar];
+			double tmL = TM_LEN_INT[cultivar];
+			
+			// elongation rate
+			double rate_a = kL * maxL * Math.exp(-kL * (age - tmL));
+			double rate_b = Math.exp(-kL * (age - tmL)) + 1;
+			double rate = rate_a / Math.pow(rate_b, 2);
+			double dt = age - agePrevious;
+			length += rate * dt;
+		}
+		double maxW = MAX_WIDTH_INT[cultivar];
+		double kW = K_WIDTH_INT[cultivar];
+		double tmW = TM_WIDTH_INT[cultivar];
+		width = maxW / (1 + Math.exp(-kW * (age - tmW)));
+		
+		area = 2 * Math.PI * 0.5*width * length;          
+	}
+}
+// internodes are visualized as cylinders
+==> 	
+	Cylinder(length, width/2)	// length, radius
+		.(setShader(getOrganShader()))
+;
+
+
+// =============================================================================
+// LEAF 
+
+module Leaf	extends VisibleOrgan {		
+	
+	double width;					// leaf width at widest point (m)
+	double totalAreaBladeletSegm;	// area of leaf blade after segmentation
+	double totalAreaSegm;			// area of leaf segments (petiole, rachis, petiolules)
+	double totalLenSegm;				// actual leaf length (petiole + segm 1 + segm 2 + term leaflet)
+	double normArea;					// normalized leaf area
+	long segments;					// number of segments the leaf blade is composed of
+	double angle;					// insertion angle of the leaf
+	double bendingAngleSegment;		// bending angle per segment
+	double bendingAngleSegment2;		// bending angle per segment
+	
+	int nrLfPairs;					// number of leaflet pairs (bladelets) on the next phytomer produced by the apex
+	
+	double petioleLength;			// length of a petiole (m)
+	
+	double lenSegment1;
+	double lenSegment2;
+		
+	double lwR;
+	double lwRlf;
+	
+	// leaf initiation
+	void initiate(Apex a)
+	{
+		cultivar = a[cultivar];
+		pb = a[pb];
+		plantNumber = a[plantNumber];
+		rank = a[rank];
+		length = 0;
+		wmax = WMAX_LEAF[cultivar];
+		te = TE_LEAF[cultivar];
+		tm = TM_LEAF[cultivar];
+		
+		lwR = LW_RATIO[cultivar];
+		lwRlf = LW_RATIO_LF[cultivar];
+		
+		width = 0;
+		totalAreaBladeletSegm = 0;
+		totalAreaSegm = 0;
+		totalLenSegm = 0; 
+		normArea = calcFractionalArea(); // not used
+	}
+	
+	void calcInverseRank() {
+		rankInv = (pb[nbPhytomers] - rank) + 1;
+			
+	}
+	
+	// calculate dimensions
+	void calcDimensions() {
+		
+		calcNrLeaflets();
+
+		if (rank > 0) {
+			
+			// area
+			double maxA = MAX_AREA_LEAF[cultivar];
+			double kA = K_AREA_LEAF[cultivar];
+			double tmA = TM_AREA_LEAF[cultivar];
+			
+			double rate_a = kA * maxA * Math.exp(-kA * (age - tmA));
+			double rate_b = Math.exp(-kA * (age - tmA)) + 1;
+			double rate = rate_a / Math.pow(rate_b, 2);
+			double dt = age - agePrevious;
+			area += (rate * dt) / 10000;
+			
+			// length (acc. Chen, 2014)
+			double aAL = A_LEN_LEAF[cultivar];
+			double gAL = G_LEN_LEAF[cultivar];
+			length = Math.pow((area*10000)/aAL, 1.0/gAL) / 100;	// cm -> m
+		}
+		
+		if (nrLfPairs == 1) {
+			length *= 0.4;	// TODO
+			petioleLength = length * 0.5;
+		} else if (nrLfPairs == 2) {
+			length *= 0.6;	// TODO
+			petioleLength = length * 0.3;
+		} else {
+			petioleLength = length * PETIOLE_FRACTION[cultivar];
+		}
+		
+		width = length / lwR;
+		
+	}
+	
+	// calculate frational area by integrating the leaf shape function in 100 steps of 0.01
+	double calcFractionalArea() {
+		double normArea = 0;
+		for (double i = 0; i <= 1; i += 0.01) {
+			normArea += getNormalizedLeafWidth(i,cultivar)*0.01;
+		}
+		return normArea;
+	}
+	
+	// calculate the number of segments that the leaf is composed of
+	void calcSegments() {
+		segments = Math.max(MIN_SEGMENTS, Math.round(frBio * MAX_SEGMENTS));
+	}
+	
+	// calculate leaf insertion angle
+	void calcAngle() {
+		
+		// leaf angle as a function of its length
+		double max = LEAF_ANGLE[cultivar];
+		double k = K_LEAF_ANGLE[cultivar];
+		angle = max * (1 - Math.exp(-k * length*100));	// simulated (m) -> measured length (cm)
+		
+		double maxS = LEAF_CURVE[cultivar] / segments;
+		// hardcoded for 3 leaflet pairs + terminal leaflet
+		double maxS2 = LEAF_CURVE[cultivar] / 4;
+		double kC = K_LEAF_CURVE[cultivar];
+		double tmC = TM_LEAF_CURVE[cultivar];
+		
+		bendingAngleSegment = maxS;
+		bendingAngleSegment2 = maxS2;
+		
+	}
+	
+	// calculate the number of leaflets per leaf
+	void calcNrLeaflets() {
+		if (rank == 1) {
+			nrLfPairs = 1;
+		} else if (rank == 2) {
+			nrLfPairs = 2;
+		} else if (rank >= 3) {
+			nrLfPairs = NR_LEAFLET_PAIRS[cultivar];
+		}
+	}
+}
+==> 
+	// leaf with leaflets
+	[
+		// leaf angle
+		RL(angle)
+		
+		{
+			totalAreaBladeletSegm = 0;
+			totalAreaSegm = 0;
+			totalLenSegm = 0; 
+			
+			lenSegment1 = length * SEGMENT1_FRACTION[cultivar];
+			lenSegment2 = length * SEGMENT2_FRACTION[cultivar];
+			
+			double segmWid = length/100;		// petiole & segments
+			double plWid = 0.0005; 			// petiolule
+		}
+		[
+		// PETIOLE
+		Cylinder(petioleLength, segmWid/2).(setShader(getOrganShader()))
+		{ totalLenSegm = petioleLength; totalAreaSegm = petioleLength*segmWid; }
+		
+		// FIRST LEAFLET PAIR
+		{ 
+			// relative distance from the leaf bottom (stem)
+			double lenFraction = petioleLength/length; 
+			double lenLeaflet = 0.5*width * getNormalizedLeafWidth(1 - lenFraction, cultivar);
+			double petiolule1Ang = LEAFLET1_ANGLE[cultivar];
+			double petiolule1Length = lenLeaflet*PETIOLULE1_FRACTION[cultivar];
+			double bladelet1Length = lenLeaflet*(1-PETIOLULE1_FRACTION[cultivar]);
+		}
+		
+		for (int i:0:1) ([
+			{ petiolule1Ang = (i%2 == 0) ? petiolule1Ang : -petiolule1Ang; }
+			RU(petiolule1Ang) 
+			Cylinder(petiolule1Length, plWid/2).(setShader(getOrganShader()))
+			l1:Leaflet(cultivar, rank, rankInv, segments, bladelet1Length, bladelet1Length/lwRlf, bendingAngleSegment)
+			{ totalAreaSegm += petiolule1Length*plWid; totalAreaBladeletSegm += l1.getAreaSegm(); }
+		])
+		
+		if (nrLfPairs >= 2) (
+		
+			// FIRST RACHIS SEGMENT AFTER PETIOLE
+			RL(bendingAngleSegment2)
+			
+			Cylinder(lenSegment1, segmWid/2).(setShader(getOrganShader()))
+			{ totalLenSegm += lenSegment1; totalAreaSegm += lenSegment1*segmWid; }
+			
+			// SECOND LEAFLET PAIR
+			{ 
+				// relative distance from the leaf bottom (stem)
+				lenFraction += SEGMENT1_FRACTION[cultivar]; 
+				lenLeaflet = 0.5*width * getNormalizedLeafWidth(1 - lenFraction, cultivar);
+				double petiolule2Ang = LEAFLET2_ANGLE[cultivar];
+				double petiolule2Length = lenLeaflet*PETIOLULE2_FRACTION[cultivar];
+				double bladelet2Length = lenLeaflet*(1-PETIOLULE2_FRACTION[cultivar]);
+			}
+			
+			for (int i:0:1) ([
+				{ petiolule2Ang = (i%2 == 0) ? petiolule2Ang : -petiolule2Ang; }
+				RU(petiolule2Ang) 
+				Cylinder(petiolule2Length, plWid/2).(setShader(getOrganShader()))
+				l2:Leaflet(cultivar, rank, rankInv, segments, bladelet2Length, bladelet2Length/lwRlf, bendingAngleSegment)
+				{ totalAreaSegm += petiolule2Length*plWid; totalAreaBladeletSegm += l2.getAreaSegm(); }
+			])
+			
+			if (nrLfPairs >= NR_LEAFLET_PAIRS[cultivar]) (
+				// SECOND RACHIS SEGMENT AFTER PETIOLE
+				RL(bendingAngleSegment2)
+				
+				Cylinder(lenSegment2, segmWid/2).(setShader(getOrganShader()))
+				{ totalLenSegm += lenSegment2; totalAreaSegm += lenSegment2*segmWid; }
+				
+				// THIRD LEAFLET PAIR
+				{ 
+					// relative distance from the leaf bottom (stem)
+					lenFraction += SEGMENT2_FRACTION[cultivar]; 
+					lenLeaflet = 0.5*width * getNormalizedLeafWidth(1 - lenFraction, cultivar);
+					double petiolule3Ang = LEAFLET3_ANGLE[cultivar];
+					double petiolule3Length = lenLeaflet*PETIOLULE3_FRACTION[cultivar];
+					double bladelet3Length = lenLeaflet*(1-PETIOLULE3_FRACTION[cultivar]);
+				}
+				
+				for (int i:0:1) ([
+					{ petiolule3Ang = (i%2 == 0) ? petiolule3Ang : -petiolule3Ang; }
+					RU(petiolule3Ang) 
+					Cylinder(petiolule3Length, plWid/2).(setShader(getOrganShader()))
+					l3:Leaflet(cultivar, rank, rankInv, segments, bladelet3Length, bladelet3Length/lwRlf, bendingAngleSegment)
+					{ totalAreaSegm += petiolule3Length*plWid; totalAreaBladeletSegm += l3.getAreaSegm(); }
+				])
+			)
+		)
+		
+		RL(bendingAngleSegment2)
+		
+		// TERMINAL LEAFLET
+		{ 
+			lenLeaflet = length * (1 - lenFraction); 
+			double petioluleTLength = lenLeaflet*PETIOLULET_FRACTION[cultivar];
+			double bladeletTLength = lenLeaflet*(1-PETIOLULET_FRACTION[cultivar]);
+		}
+		
+		Cylinder(petioluleTLength, plWid/2).(setShader(getOrganShader()))
+		lT:Leaflet(cultivar, rank, rankInv, segments, bladeletTLength, bladeletTLength/lwRlf, bendingAngleSegment)
+		{ 
+			totalAreaBladeletSegm += lT.getAreaSegm();
+			totalLenSegm += lenLeaflet; 
+			totalAreaSegm += petioluleTLength*plWid;
+		}	
+	]
+		
+	{
+		/*
+		println("========================");
+		println(this);
+		println("leaf area: " + area*10000);	//cm2
+		println("area of primary leaflets: " + (totalAreaBladeletSegm)*10000);	//cm2
+		println("area of leaf segments: " + (totalAreaSegm)*10000);	//cm2
+		println("missing area: " + (area-totalAreaBladeletSegm-totalAreaSegm)*10000);	//cm2
+		*/
+		
+		// add intercalary leaflets to match the calculated leaf area 
+		double interLfAreaTotal = area - totalAreaBladeletSegm - totalAreaSegm; 
+		double interLfArea =  0;
+		double interLfLen =  0;
+		double interPetioluleLen = 0.01;
+			
+		if (interLfAreaTotal > 0) {
+			double interSegmArea = interPetioluleLen*plWid*8;
+			double interBladeletArea = interLfAreaTotal - interSegmArea;
+			interLfArea = interBladeletArea/8; 
+			interLfLen =  Math.sqrt(lwRlf * (interLfArea / calcFractionalArea()));
+		}
+	}
+		
+	if (addIntercallaryLeaflets) (
+	
+		if (interLfArea > 0) (
+			
+			[
+				// intercallary leaflets before 1st leaflet pair
+				M(2*petioleLength/3)
+				
+				for (int i:0:1) ([
+					{ petiolule1Ang = (i%2 == 0) ? petiolule1Ang : -petiolule1Ang; }
+					RU(petiolule1Ang) RL(-LEAFLET1_LIFT_ANGLE[cultivar])
+					Cylinder(interPetioluleLen,plWid/2).(setShader(getOrganShader()))
+					il1:Leaflet(cultivar, rank, rankInv, segments, interLfLen, interLfLen/lwRlf, bendingAngleSegment)
+					{ totalAreaBladeletSegm += il1.getAreaSegm(); totalAreaSegm += interPetioluleLen*plWid; }
+				])
+				
+				
+				// intercallary leaflets before 2nd leaflet pair
+				M(petioleLength/3)
+				RL(bendingAngleSegment2)
+				M(lenSegment1/2)
+				
+				for (int i:0:1) ([
+					{ 
+						double petiolule2Ang = LEAFLET2_ANGLE[cultivar];
+						petiolule2Ang = (i%2 == 0) ? petiolule2Ang : -petiolule2Ang; 
+					}
+					RU(petiolule2Ang) RL(-LEAFLET2_LIFT_ANGLE[cultivar])
+					Cylinder(interPetioluleLen,plWid/2).(setShader(getOrganShader()))
+					il2:Leaflet(cultivar, rank, rankInv, segments, interLfLen, interLfLen/lwRlf, bendingAngleSegment)
+					{ totalAreaBladeletSegm += il2.getAreaSegm(); totalAreaSegm += interPetioluleLen*plWid; }
+				])
+				
+				// intercallary leaflets before 3rd leaflet pair
+				M(lenSegment1/2)
+				RL(bendingAngleSegment2)
+				M(lenSegment2/2)
+				
+				{ double petiolule3Ang = LEAFLET3_ANGLE[cultivar]; }
+				
+				for (int i:0:1) ([
+					{ petiolule3Ang = (i%2 == 0) ? petiolule3Ang : -petiolule3Ang; }
+					RU(petiolule3Ang) RL(-LEAFLET3_LIFT_ANGLE[cultivar])
+					Cylinder(interPetioluleLen,plWid/2).(setShader(getOrganShader()))
+					il3:Leaflet(cultivar, rank, rankInv, segments, interLfLen, interLfLen/lwRlf, bendingAngleSegment)
+					{ totalAreaBladeletSegm += il3.getAreaSegm(); totalAreaSegm += interPetioluleLen*plWid; }
+				])
+				
+				// intercallary leaflets before the terminal leaflet
+				M(lenSegment2/2)
+				RL(bendingAngleSegment2)
+				M(petioluleTLength/2)
+				
+				for (int i:0:1) ([
+					{ petiolule3Ang = (i%2 == 0) ? petiolule3Ang : -petiolule3Ang; }
+					RU(petiolule3Ang) RL(-LEAFLET3_LIFT_ANGLE[cultivar])
+					Cylinder(interPetioluleLen,plWid/2).(setShader(getOrganShader()))
+					ilt:Leaflet(cultivar, rank, rankInv, segments, interLfLen, interLfLen/lwRlf, bendingAngleSegment)
+					{ totalAreaBladeletSegm += ilt.getAreaSegm(); totalAreaSegm += interPetioluleLen*plWid; }
+				])
+			]	
+		)
+	)
+	]
+;
+
+// calculate leaf shape as the normalized width along the midrib, Coussement et al., simplified
+static double getNormalizedLeafWidth(float lnorm, int cultivar) {
+	
+	double k1 = K1_WIDTH[cultivar];
+	double k2 = K2_WIDTH[cultivar];
+	
+	double gL = 0;
+	
+	if (lnorm <= MAX_WIDTH[cultivar]) {
+		gL = 1 - Math.pow((MAX_WIDTH[cultivar] - lnorm)/MAX_WIDTH[cultivar],k1);	
+	} else {
+		gL = 1 - Math.pow((lnorm - MAX_WIDTH[cultivar])/(1 - MAX_WIDTH[cultivar]),k2);
+	}
+	
+	return gL;
+}
+
+
+// =============================================================================
+// LEAFLET 
+
+module Leaflet(int cultivar, int rank, int rankInv, long segments, float length, double width, double bendingAngleSegment)
+{	
+	double getAreaSegm() {
+		
+		double segmArea = 0;
+		
+		for (int i=1; i < segments; i++) {
+			double segmentLength = length/segments;
+			double segmentWidth = 0.5*width * getNormalizedLeafWidth(1 - (double)i/segments, cultivar);
+			segmArea += segmentLength*2*segmentWidth;
+		}
+		
+		return segmArea;
+	}
+	
+	protected Shader getOrganShader() {
+		return getMeasOP();
+	}
+	
+	protected Shader getMeasOP() {
+		// simple model
+		if (simpleModelOP) {
+			return MERLICE_AVG_U_AS;
+			
+		// complex model (two layers)
+		} else {
+			// lower layer
+			if (rankInv >= THRESHOLD_RANK) {	// top > bottom counting
+				return MERLICE_AVG_L_AS;
+				
+			// upper layer
+			} else {
+				return MERLICE_AVG_U_AS;
+			}
+		}
+	}
+} ==> 
+[
+	// only 1 leaflet == leaf
+	for (double i=1; i < segments; i++)
+	(
+		{
+			//double scale = 1; // temp
+			double segmentLength;
+			segmentLength = length/segments;
+			// getNormalizedLeafWidth specifies the half of the shape
+			double segmentWidth = 0.5*width * getNormalizedLeafWidth(1 - i/segments, cultivar);
+		}
+		
+		Parallelogram(segmentLength, 2*segmentWidth).(setShader(getOrganShader()))
+		        
+        RL(bendingAngleSegment)
+	)
+];
+
+
+// =============================================================================
+// SEED 
+
+// module for the reproductive organ
+module Flower extends VisibleOrgan
+{	
+	double stl;					// truss ratio length / biomass (mm/mg) TODO: does this make sense??????
+	double increment;			// length increment per time step
+	int flno;					// number of flowers
+	
+	// flower initiation
+	void initiate(Apex a)
+	{
+		cultivar = a[cultivar];
+		pb = a[pb];
+		plantNumber = a[plantNumber];
+		rank = a[rank];
+		length = 0;
+		wmax = WMAX_FLOWER[cultivar];
+		te = TE_FLOWER[cultivar];
+		tm = TM_FLOWER[cultivar];
+		stl = 0.04 * 0.2 / 1000;	// todo temp
+		flno = FLNO_MERLICE;
+	}
+	
+	// calculate dimensions
+	void calcDimensions()
+	{
+		increment = stl * growth;
+		length += increment;
+	}
+}                             
+==> 
+// truss
+[	RL(RUA) RH(90)
+	
+	for (int i:1:flno) 
+	(
+		
+		Cylinder(15*length * MRLENGTH*1.4,0.001).(setShader(getOrganShader()))  
+		[ 
+			if(i%2==0) (
+				RH(90)
+			) else (
+				RH(-90)
+			)
+			RU(RUA) 
+			for((1:5)) (
+				Cylinder(15*length * MRLENGTH/5,0.001).(setShader(getOrganShader())) RV(0.2)
+			) 
+			Cylinder(30*length * MRLENGTH/5,0.001).(setShader(getOrganShader())) 
+			//fruit
+			Sphere(length/5).(setShader(getOrganShader())) 
+		]
+		RU(-20)
+		
+	)
+];
+
+
+// =============================================================================
+// SEED 
+
+module Seed extends Sphere(0.001)
+{
+	int cultivar;					// plant cultivar
+	PlantBase pb;					// plant to which the seed belongs
+	int plantNumber;					// plant number in the field
+	double endo;						// endosperm biomass (mg)
+	double germinationDelay;			// delay before gemination takes place
+	
+	// seed initiation
+	void initiate(int cultivar, PlantBase pb, int i)
+	{
+		this.cultivar = cultivar;
+		this.pb = pb;
+		plantNumber = i;
+		endo = SEED_MASS[cultivar];
+		germinationDelay = DELAY[cultivar];
+	}
+	
+	// conditions for germinations
+	boolean shouldEmerge(PlantBase pb) {
+		return (pb[age] >= germinationDelay);
+	}
+}
+
+
+// =============================================================================
+// ROOT 
+
+// root sink module when root system is not explicitly simulated 
+module RootSystem extends GrowingOrgan
+{
+	// root initiation
+	void initiate(PlantBase pb)
+	{
+		cultivar = pb[cultivar];
+		this.pb = pb;
+		plantNumber = pb[plantNumber];
+		length = 0;
+		wmax = WMAX_ROOT[cultivar];
+		te = TE_ROOT[cultivar];
+		tm = te / 2;
+	}
+}
+
+
+// =============================================================================
+// APEX 
+
+// apex module, represents the apical meristem that produces new phytomers
+module Apex extends Organ
+{
+	int numberVegPhyt;				// number of leaves (vegetative phytomers) to produce
+	int nrLeaves;					// number of leaves on the next phytomer produced by the apex
+	double phylloAngle;				// phyllotactic angle for the next phytomer
+	
+	// initiation of main apex
+	void initiate(PlantBase pb)
+	{
+		this.pb = pb;
+		cultivar = pb[cultivar];
+		plantNumber = pb[plantNumber];
+		rank = 0;
+		numberVegPhyt = FINAL_VEG_PHYT_NUM[cultivar];
+		nrLeaves = 1;
+		phylloAngle = PHYLLOTAXIS[cultivar];
+		
+	}
+	
+	// increase in identifiers after phytomer creation
+	void increment()
+	{
+		rank = rank + 1;
+	}
+		
+	// conditions for vegetative phytomer productions
+	boolean shouldProduceVegetative() {                  
+		if (rank <= numberVegPhyt && age >= rank * phyllochr) {
+			return true;	
+		}
+	}
+	
+	// conditions fot reproductive phytomer production
+	boolean shouldProduceGenerative()
+	{
+		if (rank > numberVegPhyt && age >= rank * phyllochr) {
+			pb[flowering] = true; 
+			return true;
+		}                                                          
+	} 	
+}
+// buds are visualized as spheres
+==> 
+	if (visualiseApex) (
+		Sphere(0.01).(setShader(SH_GREEN))
+	)
+;
+
+module Cotyledon(float petioleLength, float petioleDiameter, float leafLength)
+{
+	protected Shader getOrganShader() {
+		return getMeasOP();
+	}
+	
+	protected Shader getMeasOP() {
+		return SH_GREEN;
+	}
+}
+==>
+	{
+		float lenDiff = leafLength-petioleLength;
+	}
+	RL(50)
+	Cylinder(petioleLength, petioleDiameter).(setShader(getOrganShader()))
+	RL(40)
+	Parallelogram(lenDiff/2, 1*toCM).(setShader(getOrganShader()))
+	RL(10)
+	Parallelogram(lenDiff/2, 1*toCM).(setShader(getOrganShader()))
+;

@@ -1,0 +1,425 @@
+module temp;		// dummy module to keep simulation running
+
+// =============================================================================
+// GLOBAL VARIABLES
+// =============================================================================
+
+
+static String path				= getWD();
+static String climateFileDaily 	= 
+	"input\\exp2_climate_kaspro_avg.csv";	// includes kaspro predictions (par - daylight avg)
+static String plantFile = 
+	"input\\exp2_harvest1_merlice_avg.csv";
+	
+
+// HEADLESS - SENSITIVITY ANALYSIS
+// headless input parameters
+static boolean headless 		= false;
+
+
+// timers
+static int halt;				// time at which simulation should stop (currently: harvest - 1)
+static int time;				// in days (day of simulation)
+static int dayOfYear;		// day of the year
+static boolean end;
+
+
+// environment
+static double tav;			// average air temperature
+static double co2av;			// average CO2
+static double parav;			// average PAR
+static String date = null;	// date from climate file
+static double dayLength;		// hours of daylight
+static double dd;			// degree days since simulation start
+static String[][] climateDataDaily;
+
+// destructive measurements
+static String[][] plantDataHarvest;
+
+static float DailyDiffuseRadiation;
+static float globalRadiationIntensity;		// total incoming radiation from all directions at the horizontal plane
+static float PPFD;							// photosynthetic photon flux density in umol/m2/s
+
+// control flags
+static boolean useClimateData 	= true;
+
+static boolean thornley			= false;		// false - FvCB, true - Thornley
+// if thornley = true: (for FvCB avg values are used)
+static boolean simpleModelPS		= false;		// true - upper layer values for PS used, false - PS parameters for 2 layers 
+
+static boolean simpleModelOP		= false;		// true - upper layer values for spectral opt. prop. used, false - OP parameters for 2 layers
+
+static boolean seeRays			= false;		// see direction of rays from light sources if true
+
+static boolean visualiseApex		= false;		// draw buds as spheres
+
+static boolean functional		= true;		// false: structural model only (light is intercepted but not used for growth)
+static boolean plantDeath		= true;		// toggle possibilities for entire plants to taken from the scene in case of very low source/sink ratio
+
+static boolean lightPruning		= false;		// true - first leaf after each truss removed
+
+static boolean directLight		= false;		// false - light sources for sun have zero power
+
+static boolean addIntercallaryLeaflets		= true;
+
+// disable for 3d export!
+static boolean refTile			= true;
+static boolean infinite			= true;		// clone the canopy to eliminate border effects
+
+static boolean render			= false;		// save renders of the scene
+static boolean export3D			= false;		// save 3d of the scene
+
+
+
+// =============================================================================
+// SPECIES / CULTIVAR PARAMETERS
+// =============================================================================
+
+// cultivar
+static int cultivar;			// to specify in the axiom
+
+// cultivar value and name assignment
+static int MERLICE = 0;		// Merlice cultivar (experiment 2)
+static int BRIOSO = 1;		// Brioso cultivar (experiment 2)
+
+static String[] speciesNames = {"MERLICE_E2","BRIOSO_E2"};	// species names to be used in output
+static int totalSpecies	= speciesNames.length;				// total number of species defined
+
+
+// =============================================================================
+// PARAMETERS
+// =============================================================================
+
+	
+// GroIMP initially interpretes object dimensions as meters
+const float toCM = 0.01;
+const float toMM = 0.001;
+
+// default parameter value if missing in the file (eg. for small imternodes)
+const float INIT_LENGTH = 0.001;	// internode (0.001 = 1 mm)
+
+// PLANT HARVEST
+
+// doy 334, 30.11.2021
+const int HARVEST = 77;				// simulation duration, i.e. harvest/removal time after emergence (in days)
+
+
+// CROP
+
+static int MASTER_NR			= 1;				// plant number of the plant for plotting
+
+static int nrClones			= 10;			// number of cloned canopies in x and y direction
+static double cropWidth;
+static double cropLength;
+
+
+//////////////////////////////////////////////////////////
+// SET THE NUMBER OF PLANTS IN THE SCENE AND THEIR SPACING
+
+static int nrRows				= 1;			// number of rows (NPEC: number of columns - belts, MAX 16)
+static int nrPlants				= 1;			// number of plant POSITIONS in a row (plant nb = nrPlants/GAP_PLANTS) (NPEC: number of rows in a column, MAX 35)
+const int GAP_PLANTS				= 1;			// in each row, only every Xth plant
+
+const double ROW_DIST			= 0.58;		// distance between rows
+const double PLANT_DIST			= 3*0.235;	// distance between plants in a row (pot length)
+
+static long totalPlants;						// total number of plants per species
+static double area;							// total ground area 
+
+//////////////////////////////////////////////////////////
+
+// ENVIRONMENT
+
+const float latitude 			= 52 * Math.PI/180;	// the latitude of location of the scene
+// experiment 2
+// sowing 9.9.2021 - doy 252
+// estimated emergence 16.9.2021 - doy 259
+// harvesting #1 12.10.2021 - doy 285 (avg nb of leaves for Merlice is 5)
+// harvesting #8 30.11.2021 - doy 334 (avg nb of leaves for Merlice is 20)	
+const int startingDayOfYear		= 259;			// overall starting simulation day of year
+
+const int STARTING_DOY_DATA			= 252;		// for the daily data files which start with 9 Sep = doy 252
+const int STARTING_DOY_DATA_KASPRO	= 267;		// Kaspro input from 24 Sep = doy 267
+const int LAST_DOY_DATA_KASPRO		= 333;		// Kaspro input till 29 Nov = doy 333
+
+const double TEMP_CONST_AVG		= 17;	// constant daily average temperature: 17, 21, 25
+const double CO2_CONST_AVG		= 400;
+
+static int dayLengthModel;
+const int DL_CONST				= 1;
+const int DL_VAR					= 2;
+
+static int radiationModel;
+const int RAD_CONST				= 1;
+const int RAD_VAR				= 2;
+const int RAD_KASPRO				= 3;
+
+static int tempModel;
+const int TEMP_CONST				= 1;
+const int TEMP_VAR				= 2;
+const int TEMP_KASPRO			= 3;
+
+static int CO2Model;
+const int CO2_CONST				= 1;
+const int CO2_KASPRO				= 2;
+
+const double GH_TRANSMISSIVITY	= 0.7;
+
+// fixed environment values
+const double DL_FIXED 		= 16;	// fixed photoperiod (daylight duration in h)
+const double DR_FIXED 		= 250;	// fixed radiation (W?)
+
+// setup of light sources (45, 90)
+const float ToRadians				= Math.PI/180;		// conversion factor degrees to radians
+const float ToDegree					= 180/Math.PI;		// conversion factor radians to degrees
+const float Transmissivity			= 0.3548;			// based on KNMI data 10 years' mean; percentage of light that transmitted through atmosphere on a day of clear sky
+const float FractionDiffuseLightDaily	= 0.8;			//1.33 - 1.46*0.3548 // fraction of diffuse light in the total radiation on a day of clear sky  Spitter 1986
+const float tilt						= 23.45*ToRadians;	// tilt of the earth axis
+const float c						= 0.4; 				// parameter for collecting radiation transition related with elevation angle Spitter 1986
+const int n							= 24;				// number of direct light sources during the day
+static float[][] betaAzimSdr			= new float[3][];	// row 1 solar elevation beta; row 2 solar azimuth; and row 3 direct light
+
+// PHOTOSYNTHESIS
+
+static double VPD		= 1;			// vapour pressure deficit
+static double O2			= 210;		// oxygen level
+
+// for the average ACi curves (manually estimated)
+static double JMAX		= 105;
+static double VCMAX		= 50;
+static double TPU		= 7.7;
+static double GM		= 0.06;
+static double ALPHA_J	= 0.34;		// Light response
+static double THETA_J	= 0.8;		// Light response
+
+static double RD 		= 1.83;		// dark respiration (mmol m-2 s-1)
+
+// DEVELOPMENT
+
+static double phyllochr;
+
+// SINK-SOURCE
+
+const double M_CO2 		= 44.01;		// CO2 molar mass  (gr/mol)	(44.01e-6 - mass of 1 umol CO2 in g)
+const double RM 			= 0.015;		// maintenance respiration  (gr CO2 / gr plant biomass / day)
+const double F_CO2 		= 0.6;		// conversion factor grom gr CO2 to gr biomass
+const double RG 			= 0.1;		// growth respiration in fraction biomass
+
+const double RM_LF 		= 0.03;		// maintenance respiration  (g / g / day)
+const double RM_INT 		= 0.015;		// maintenance respiration  (g / g / day)
+const double RM_FR 		= 0.01;		// maintenance respiration  (g / g / day)
+const double RM_RT 		= 0.01;		// maintenance respiration  (g / g / day)
+
+// SHAPE / GEOMETRY
+
+const long MIN_SEGMENTS 	= 30;		// min number of segments that the leaf is composed of
+const long MAX_SEGMENTS 	= 100;		// max number of segments that the leaf is composed of
+
+// TRUSS
+
+const int FLNO_MERLICE 	= 5;			// number of flowers
+//const int FLNO_BRIOSO 	= 10;		// number of flowers
+const int RUA 			= 75;
+const float MRLENGTH 	= 0.01; 
+
+
+// LIGHT MODEL
+
+// light model setup 
+const int LM_RAYS 	= 10000000;		// number of rays
+const int LM_DEPTH 	= 10;			// recursion depth (nb. of reflections)
+const int LM_SEED 	= 5000;
+
+// CPU LM (twilight)
+const LightModel LM 	= new LightModel(LM_RAYS, LM_DEPTH);
+
+
+// threshold rank 
+// upper level: rank > THRESHOLD_RANK, rankInv < THRESHOLD_RANK
+const int THRESHOLD_RANK	= 10;	
+
+
+// =============================================================================
+// SHADERS
+// =============================================================================
+
+
+// PLANT
+
+// green shader
+static Phong SH_GREEN = new Phong()
+	.(setDiffuse(new RGBColor(0, 1, 0)));	// 33% reflected
+
+// modes for optical properties
+const int OP_AVG		= 1;		// avg of upper and lower layer
+const int OP_U		= 2;		// upper layer
+const int OP_L		= 3;		// lower layer
+
+
+/////////////////////////////
+// average values upper layer
+/////////////////////////////
+
+// MERLICE
+
+// upper side leaf
+static Phong MERLICE_ADAXIAL_AVG_U = new Phong()
+	.(setDiffuse(new Graytone(0.233)))				// 23.3% reflected
+	.(setDiffuseTransparency(new Graytone(0.038)));	// 3.8% transmitted
+// lower side leaf
+static Phong MERLICE_ABAXIAL_AVG_U = new Phong()
+	.(setDiffuse(new Graytone(0.277)))				// 27.7% reflected
+	.(setDiffuseTransparency(new Graytone(0.039)));	// 3.9% transmitted
+static SideSwitchShader MERLICE_AVG_U_SS = new SideSwitchShader(
+	MERLICE_ADAXIAL_AVG_U, 
+	MERLICE_ABAXIAL_AVG_U);
+// gui, raytracer, radiation
+static AlgorithmSwitchShader MERLICE_AVG_U_AS = new AlgorithmSwitchShader(
+	SH_GREEN, 
+	SH_GREEN, 
+	MERLICE_AVG_U_SS);
+
+//////////////////////////////
+// average values lower layer
+//////////////////////////////
+
+// MERLICE
+
+// upper side leaf
+static Phong MERLICE_ADAXIAL_AVG_L = new Phong()
+	.(setDiffuse(new Graytone(0.224)))				// 22.4% reflected
+	.(setDiffuseTransparency(new Graytone(0.027)));	// 2.7% transmitted
+// lower side leaf
+static Phong MERLICE_ABAXIAL_AVG_L = new Phong()
+	.(setDiffuse(new Graytone(0.271)))				// 27.1% reflected
+	.(setDiffuseTransparency(new Graytone(0.028)));	// 2.8% transmitted
+static SideSwitchShader MERLICE_AVG_L_SS = new SideSwitchShader(
+	MERLICE_ADAXIAL_AVG_L, 
+	MERLICE_ABAXIAL_AVG_L);
+// gui, raytracer, radiation
+static AlgorithmSwitchShader MERLICE_AVG_L_AS = new AlgorithmSwitchShader(
+	SH_GREEN, 
+	SH_GREEN, 
+	MERLICE_AVG_L_SS);
+
+// =============================================================================
+// CHARTS
+// =============================================================================
+
+static int MAX_RANK_CHART = 10;
+
+// climate
+const DatasetRef dlData = new DatasetRef("Day length");
+const DatasetRef ppfdData = new DatasetRef("PPFD");
+const DatasetRef lightData = new DatasetRef("Intercepted light and photosynthesis");
+const DatasetRef tempData = new DatasetRef("Daily temperature");
+const DatasetRef thTempData = new DatasetRef("Cum. thermal temperature");
+const DatasetRef co2Data = new DatasetRef("Daily CO2 (ppm)");
+// plant
+const DatasetRef plantHeightData = new DatasetRef("Plant height [cm]");
+const DatasetRef plantLeafAreaData = new DatasetRef("Plant leaf area [cm2]");
+const DatasetRef totPlantDwData = new DatasetRef("Total plant biomass (dry weight) [g]");
+const DatasetRef totLeavesDwData = new DatasetRef("Total leaves biomass (dry weight) [g]");
+const DatasetRef totStemDwData = new DatasetRef("Total stem biomass (dry weight) [g]");
+const DatasetRef totTrussesDwData = new DatasetRef("Trusses biomass (dry weight) [g]");
+const DatasetRef plantNbLeavesData = new DatasetRef("Plant #leaves");
+// organ
+const DatasetRef leavesGrData = new DatasetRef("Potential vs. actual growth rate of leaves [g d-1]");
+const DatasetRef leavesDwData = new DatasetRef("Biomass (dry weight) of leaves [g]");
+const DatasetRef leavesLenData = new DatasetRef("Length of leaves [cm]");
+const DatasetRef leavesAreaData = new DatasetRef("Area of leaves [cm2]");
+const DatasetRef intGrData = new DatasetRef("Potential vs. actual growth rate of internodes [g d-1]");
+const DatasetRef intDwData = new DatasetRef("Biomass (dry weight) of internodes [g]");
+const DatasetRef intLenData = new DatasetRef("Length of internodes [cm]");
+const DatasetRef trussDwData = new DatasetRef("Biomass (dry weight) of trusses [g]");
+
+// =============================================================================
+// CULTIVAR-SPECIFIC PARAMETERS
+// =============================================================================
+
+static double[] DELAY			= new double[totalSpecies];		// germination delay after start of simulation (in degreedays)
+
+static double[] PHYLLOCHRON		= new double[totalSpecies];		// time between appearance of two PHYTOMERS (dd)
+static int[] FINAL_VEG_PHYT_NUM	= new int[totalSpecies];			// final number of main stem vegetative phytomers
+
+static double[] WMAX_ROOT		= new double[totalSpecies];		// maximum root system biomass
+static double[] WMAX_FLOWER		= new double[totalSpecies];		// maximum flower/fruit biomass
+static double[] WMAX_INT			= new double[totalSpecies];		// maximum internode biomass
+static double[] WMAX_LEAF		= new double[totalSpecies];		// maximum leaf biomass
+static double[] TE_ROOT			= new double[totalSpecies];		// root growth duration
+static double[] TE_FLOWER		= new double[totalSpecies];		// flower/fruit growth duration
+static double[] TE_INT			= new double[totalSpecies];		// internode growth duration
+static double[] TE_LEAF			= new double[totalSpecies];		// leaf growth duration
+static double[] TM_FLOWER		= new double[totalSpecies];		// flower/fruit growth duration
+static double[] TM_INT			= new double[totalSpecies];		// internode growth duration
+static double[] TM_LEAF			= new double[totalSpecies];		// leaf growth duration
+
+static double[] MAX_WIDTH_INT	= new double[totalSpecies];		// maximum internode width
+static double[] K_WIDTH_INT		= new double[totalSpecies];		// k logistic function
+static double[] TM_WIDTH_INT		= new double[totalSpecies];		// inflection point logistic function
+
+static double[] MAX_LEN_INT		= new double[totalSpecies];		// maximum internode length
+static double[] K_LEN_INT		= new double[totalSpecies];		// k logistic function
+static double[] TM_LEN_INT		= new double[totalSpecies];		// inflection point logistic function
+
+static double[] MAX_LEN_LEAF		= new double[totalSpecies];		// maximum leaf length
+static double[] K_LEN_LEAF		= new double[totalSpecies];		// k logistic function
+static double[] TM_LEN_LEAF		= new double[totalSpecies];		// inflection point logistic function
+
+static double[] A_LEN_LEAF		= new double[totalSpecies];		// a power function (area-length relation)
+static double[] G_LEN_LEAF		= new double[totalSpecies];		// g power function
+
+static double[] MAX_AREA_LEAF	= new double[totalSpecies];		// maximum leaf area
+static double[] K_AREA_LEAF		= new double[totalSpecies];		// k logistic function
+static double[] TM_AREA_LEAF		= new double[totalSpecies];		// inflection point logistic function
+
+static double[] AMAX				= new double[totalSpecies];		// max photosynthesis rate
+static double[] EFF				= new double[totalSpecies];		// initial light use efficiency (initial slope of light response curve)
+static double[] THETA 			= new double[totalSpecies];		// curvature
+// lower level (up to rank 10 and including)
+static double[] AMAX_LOWER		= new double[totalSpecies];		// max photosynthesis rate
+static double[] EFF_LOWER		= new double[totalSpecies];		// initial light use efficiency (initial slope of light response curve)
+static double[] THETA_LOWER 		= new double[totalSpecies];		// curvature
+// upper level (rank 11 and above)
+static double[] AMAX_UPPER		= new double[totalSpecies];		// max photosynthesis rate
+static double[] EFF_UPPER		= new double[totalSpecies];		// initial light use efficiency (initial slope of light response curve)
+static double[] THETA_UPPER 		= new double[totalSpecies];		// curvature
+
+static double[] LW_RATIO			= new double[totalSpecies];		// ratio between leaf blade length and width
+static double[] LW_RATIO_LF		= new double[totalSpecies];		// ratio between leaflet blade length and width
+static double[] MAX_WIDTH		= new double[totalSpecies];		// location on the leaf where width is maximal (fraction of length)
+static double[] K1_WIDTH			= new double[totalSpecies];		// parameter of getNormalizedLeafWidth2
+static double[] K2_WIDTH			= new double[totalSpecies];		// parameter of getNormalizedLeafWidth2
+
+static double[] INIT_LEAF_ANGLE	= new double[totalSpecies];		// initial insertion angle of all leaves (90 = horizontal)
+
+static double[] LEAF_ANGLE		= new double[totalSpecies];		// (calc acc Chen) max insertion angle of all leaves (90 = horizontal)
+static double[] K_LEAF_ANGLE		= new double[totalSpecies];		// (calc acc Chen) k logistic function
+
+static double[] LEAF_CURVE		= new double[totalSpecies];		// leaf curvature - angle between bottom and top of leaf blade (0 = flat)
+static double[] K_LEAF_CURVE		= new double[totalSpecies];		// k logistic function
+static double[] TM_LEAF_CURVE	= new double[totalSpecies];		// inflection point logistic function
+
+static int[] NR_LEAFLET_PAIRS	= new int[totalSpecies];			// number of leaflet pairs for leaf rank >= 3
+
+static double[] PETIOLE_FRACTION 	=  new double[totalSpecies];	// fraction of leaf length
+static double[] PETIOLULE1_FRACTION 	=  new double[totalSpecies];	// fraction of leaflet length
+static double[] PETIOLULE2_FRACTION	=  new double[totalSpecies];	// fraction of leaflet length
+static double[] PETIOLULE3_FRACTION 	=  new double[totalSpecies];	// fraction of leaflet length
+static double[] PETIOLULET_FRACTION 	=  new double[totalSpecies];	// fraction of leaflet length
+static float[] LEAFLET1_ANGLE 		= new float[totalSpecies];
+static float[] LEAFLET2_ANGLE 		= new float[totalSpecies];
+static float[] LEAFLET3_ANGLE 		= new float[totalSpecies];
+static float[] LEAFLET1_LIFT_ANGLE 	= new float[totalSpecies];
+static float[] LEAFLET2_LIFT_ANGLE 	= new float[totalSpecies];
+static float[] LEAFLET3_LIFT_ANGLE 	= new float[totalSpecies];
+static double[] SEGMENT1_FRACTION 	=  new double[totalSpecies];	// rachis segment btw 1st and 2nd leaflet pair as fraction of length
+static double[] SEGMENT2_FRACTION 	=  new double[totalSpecies];	// rachis segment btw 2nd and 3rd leaflet pair as fraction of length
+
+static double[] PHYLLOTAXIS 		= new double[totalSpecies];		// angle between consecutive leaves along a stem
+
+static double[] SEED_MASS		= new double[totalSpecies];		// seed endosperm mass in mg
+
+static double[] TB				= new double[totalSpecies];		// base temperature for thermal time calculation
+
+static double[] RL_RATIO			= new double[totalSpecies];		// Root/Leaf ratio
